@@ -7,7 +7,7 @@ type PasswordRequirementsProps = {
 
 export function PasswordRequirements({ checks }: PasswordRequirementsProps) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-3 bg-white rounded-lg border border-outline-variant">
+    <div className="grid grid-cols-2 gap-1.5 p-3 bg-white rounded-lg border border-outline-variant">
       {PASSWORD_RULES.map((rule) => {
         const ok = checks[rule.key]
         return (

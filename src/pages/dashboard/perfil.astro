@@ -1,0 +1,75 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+import ProfileForm, { type ProfileFormValues } from '../../components/ProfileForm'
+
+const PROFILE_COOKIE = 'partner_profile'
+
+function parseProfile(raw: string | undefined, fallbackName: string): ProfileFormValues {
+  const defaults: ProfileFormValues = {
+    fullName: fallbackName,
+    documentId: '',
+    phone: '',
+    location: '',
+    isLeadAuditor: true,
+    standards: ['ISO 9001'],
+    years: '',
+    certifier: '',
+  }
+
+  if (!raw) return defaults
+  try {
+    return { ...defaults, ...(JSON.parse(raw) as Partial<ProfileFormValues>) }
+  } catch {
+    return defaults
+  }
+}
+
+const nameFromCookie = Astro.cookies.get('partner_name')?.value ?? ''
+let profile = parseProfile(Astro.cookies.get(PROFILE_COOKIE)?.value, nameFromCookie)
+let saved = Astro.url.searchParams.get('saved') === '1'
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData()
+  const nextProfile: ProfileFormValues = {
+    fullName: String(formData.get('fullName') ?? '').trim(),
+    documentId: String(formData.get('documentId') ?? '').trim(),
+    phone: String(formData.get('phone') ?? '').trim(),
+    location: String(formData.get('location') ?? ''),
+    isLeadAuditor: formData.get('isLeadAuditor') != null,
+    standards: formData.getAll('standards').map(String),
+    years: String(formData.get('years') ?? '').trim(),
+    certifier: String(formData.get('certifier') ?? '').trim(),
+  }
+
+  Astro.cookies.set(PROFILE_COOKIE, JSON.stringify(nextProfile), {
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: import.meta.env.PROD,
+  })
+
+  if (nextProfile.fullName) {
+    Astro.cookies.set('partner_name', nextProfile.fullName, {
+      path: '/',
+      httpOnly: false,
+      sameSite: 'lax',
+      secure: import.meta.env.PROD,
+    })
+  }
+
+  return Astro.redirect('/dashboard/perfil?saved=1')
+}
+---
+
+<DashboardLayout title="Mi Perfil">
+  <div class="w-full">
+    <header class="mb-4">
+      <h1 class="mb-1 text-headline-md font-bold text-on-surface">Completar Perfil Profesional</h1>
+      <p class="text-body-md text-on-surface-variant">
+        Complete los datos solicitados para evaluar su perfil como auditor o especialista.
+      </p>
+    </header>
+
+    <ProfileForm client:load initialValues={profile} saved={saved} />
+  </div>
+</DashboardLayout>

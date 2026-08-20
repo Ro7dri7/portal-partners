@@ -1,0 +1,120 @@
+---
+import '../index.css'
+import RegisterForm from '../components/RegisterForm'
+import { LOGO_URL, REGISTER_HERO_URL } from '../constants'
+import { isPasswordValid } from '../utils/passwordValidation'
+
+if (Astro.cookies.get('auth_token')?.value) {
+  return Astro.redirect('/dashboard')
+}
+
+let errorMessage = ''
+let initialRole: 'afiliado' | 'auditor' = 'afiliado'
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData()
+  const roleRaw = String(formData.get('role') ?? 'afiliado')
+  const role = roleRaw === 'auditor' ? 'auditor' : 'afiliado'
+  initialRole = role
+
+  const fullName = String(formData.get('fullName') ?? '').trim()
+  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const password = String(formData.get('password') ?? '')
+  const confirmPassword = String(formData.get('confirmPassword') ?? '')
+  const terms = formData.get('terms') != null
+
+  if (!fullName || !email || !password || !confirmPassword) {
+    errorMessage = 'Completa todos los campos requeridos.'
+  } else if (!isPasswordValid(password)) {
+    errorMessage = 'La contraseña no cumple los requisitos de seguridad.'
+  } else if (password !== confirmPassword) {
+    errorMessage = 'Las contraseñas no coinciden.'
+  } else if (!terms) {
+    errorMessage = 'Debes aceptar los términos y condiciones.'
+  } else {
+    const cookieOpts = {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure: import.meta.env.PROD,
+    }
+
+    Astro.cookies.set('auth_token', 'token-demo-123', cookieOpts)
+    Astro.cookies.set('partner_role', role, cookieOpts)
+    Astro.cookies.set('partner_name', fullName, { ...cookieOpts, httpOnly: false })
+    Astro.cookies.set('partner_email', email, { ...cookieOpts, httpOnly: false })
+
+    return Astro.redirect('/dashboard')
+  }
+}
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registro | Intercert Latam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="h-dvh overflow-hidden bg-background font-sans text-on-surface antialiased">
+    <div class="flex h-dvh w-full overflow-hidden">
+      <div
+        class="relative hidden bg-surface-container bg-cover bg-center lg:flex lg:w-1/2"
+        style={`background-image: url('${REGISTER_HERO_URL}')`}
+      >
+        <div
+          class="absolute inset-0 bg-gradient-to-br from-primary/80 to-primary-container/40 mix-blend-multiply"
+        >
+        </div>
+        <div class="relative z-10 flex h-full flex-col justify-end p-margin-page text-on-primary">
+          <div class="mb-12 max-w-lg">
+            <span class="material-symbols-outlined mb-4 text-4xl text-secondary-container"
+              >verified_user</span
+            >
+            <h2 class="mb-stack-md text-display-lg font-bold tracking-tight">
+              Excelencia en Certificación
+            </h2>
+            <p class="text-body-lg opacity-90">
+              Únete a la red de partners de Intercert Latam y gestiona tus procesos de auditoría con
+              la máxima eficiencia y seguridad.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="flex h-dvh w-full flex-col items-center justify-start overflow-hidden bg-surface-container-lowest px-6 py-5 sm:px-margin-page lg:w-1/2"
+      >
+        <div class="flex w-full max-w-[420px] min-h-0 flex-1 flex-col justify-center animate-fade-in">
+          <div class="mb-8 flex justify-center lg:justify-start">
+            <img alt="Intercert" class="h-10 w-auto max-w-[240px] object-contain" src={LOGO_URL} />
+          </div>
+
+          <RegisterForm client:load initialError={errorMessage} initialRole={initialRole} />
+
+          <div class="mt-8 text-center">
+            <p class="text-body-md text-on-surface-variant">
+              ¿Ya tienes cuenta?{' '}
+              <a
+                href="/login"
+                class="text-label-md font-semibold text-secondary transition-colors hover:text-on-secondary-container hover:underline"
+              >
+                Inicia sesión
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

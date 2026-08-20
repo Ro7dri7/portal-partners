@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { useOutletContext } from 'react-router-dom'
-import { MaterialIcon } from '../components/MaterialIcon'
-import type { PartnerUser } from '../constants'
-
-type DashboardContext = {
-  user: PartnerUser
-}
+import { MaterialIcon } from './MaterialIcon'
 
 type CommentAuthor = 'coordinator' | 'applicant'
 
@@ -16,6 +10,10 @@ type Comment = {
   name: string
   text: string
   timestamp: string
+}
+
+type ApplicationStatusProps = {
+  applicantName: string
 }
 
 const COMMENTS_KEY = 'intercert_application_comments'
@@ -38,7 +36,12 @@ const INITIAL_COMMENTS: Comment[] = [
   },
 ]
 
+function canUseStorage() {
+  return typeof window !== 'undefined' && typeof localStorage !== 'undefined'
+}
+
 function loadComments(): Comment[] {
+  if (!canUseStorage()) return INITIAL_COMMENTS
   const raw = localStorage.getItem(COMMENTS_KEY)
   if (!raw) return INITIAL_COMMENTS
   try {
@@ -49,6 +52,7 @@ function loadComments(): Comment[] {
 }
 
 function saveComments(comments: Comment[]) {
+  if (!canUseStorage()) return
   localStorage.setItem(COMMENTS_KEY, JSON.stringify(comments))
 }
 
@@ -61,15 +65,21 @@ function formatNow() {
   }).format(new Date())
 }
 
-export function ApplicationStatusPage() {
-  const { user } = useOutletContext<DashboardContext>()
-  const [comments, setComments] = useState<Comment[]>(() => loadComments())
+export default function ApplicationStatus({ applicantName }: ApplicationStatusProps) {
+  const [comments, setComments] = useState<Comment[]>(INITIAL_COMMENTS)
+  const [hydrated, setHydrated] = useState(false)
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    setComments(loadComments())
+    setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
     saveComments(comments)
-  }, [comments])
+  }, [comments, hydrated])
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -79,10 +89,7 @@ export function ApplicationStatusPage() {
     const text = draft.trim()
     if (!text) return
 
-    const name =
-      author === 'coordinator'
-        ? 'Ana Silva'
-        : `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim() || 'Partner'
+    const name = author === 'coordinator' ? 'Ana Silva' : applicantName.trim() || 'Partner'
 
     const next: Comment = {
       id: `${Date.now()}`,
@@ -108,7 +115,7 @@ export function ApplicationStatusPage() {
   }
 
   return (
-    <div className="mx-auto max-w-container-max">
+    <div className="mx-auto w-full">
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h2 className="mb-1 text-headline-lg font-bold tracking-tight text-primary">
@@ -148,18 +155,8 @@ export function ApplicationStatusPage() {
             <div className="absolute left-8 top-1/2 z-0 h-1 w-1/3 -translate-y-1/2 rounded-full bg-secondary transition-all duration-500" />
 
             <div className="relative z-10 flex w-full items-center justify-between">
-              <Step
-                state="done"
-                label="Enviado"
-                sublabel="12 oct 2023"
-                icon="check"
-              />
-              <Step
-                state="active"
-                label="En revisión"
-                sublabel="Fase actual"
-                icon="autorenew"
-              />
+              <Step state="done" label="Enviado" sublabel="12 oct 2023" icon="check" />
+              <Step state="active" label="En revisión" sublabel="Fase actual" icon="autorenew" />
               <Step state="pending" label="Validación" number={3} />
               <Step state="pending" label="Respuesta final" number={4} />
             </div>
@@ -279,11 +276,7 @@ function Step({
   number?: number
 }) {
   return (
-    <div
-      className={`flex w-1/4 flex-col items-center gap-2 ${
-        state === 'pending' ? 'opacity-50' : ''
-      }`}
-    >
+    <div className={`flex w-1/4 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}>
       {state === 'done' && (
         <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-secondary text-on-secondary shadow-sm">
           <MaterialIcon name={icon ?? 'check'} filled className="text-[20px]" />

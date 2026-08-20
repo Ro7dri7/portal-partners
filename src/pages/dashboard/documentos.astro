@@ -1,0 +1,24 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+import DocumentUploader from '../../components/DocumentUploader'
+
+async function fetchDocumentsState() {
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  return { status: 'pendiente' as const }
+}
+
+const docs = await fetchDocumentsState()
+---
+
+<DashboardLayout title="Documentos">
+  <div class="w-full">
+    <header class="mb-4">
+      <h2 class="mb-1 text-headline-md font-bold text-on-surface">Sube tu documentación</h2>
+      <p class="text-body-md text-on-surface-variant">
+        Sube tu documentación de sustento. Asegúrate de que los archivos sean legibles.
+      </p>
+    </header>
+
+    <DocumentUploader client:load initialStatus={docs.status} maxSizeMb={10} />
+  </div>
+</DashboardLayout>

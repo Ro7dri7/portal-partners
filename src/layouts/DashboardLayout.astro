@@ -1,0 +1,231 @@
+---
+import '../index.css'
+import { AVATAR_URL, FAVICON_URL, LOGO_URL } from '../constants'
+
+const { title = 'Partner Portal' } = Astro.props
+const pathname = Astro.url.pathname
+const partnerName = Astro.cookies.get('partner_name')?.value ?? 'Alex R.'
+const partnerRole = Astro.cookies.get('partner_role')?.value
+const roleLabel = partnerRole === 'auditor' ? 'Partner Auditor' : 'Afiliado'
+const shortName = partnerName.split(' ').slice(0, 2).join(' ')
+
+const PRIMARY_NAV = [
+  { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', end: true },
+  { href: '/dashboard/perfil', label: 'Perfil', icon: 'person', end: false },
+  { href: '/dashboard/documentos', label: 'Documentos', icon: 'description', end: false },
+  { href: '/dashboard/estado', label: 'Estado de Solicitud', icon: 'pending_actions', end: false },
+  { href: '/dashboard/capacitacion', label: 'Capacitación', icon: 'school', end: false },
+]
+
+function isActive(href: string, end = false) {
+  if (end) return pathname === href
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+function navClass(active: boolean) {
+  return active
+    ? 'nav-item flex items-center gap-3 border-l-4 border-secondary-container bg-primary-container/10 py-2.5 text-secondary-container font-semibold'
+    : 'nav-item flex items-center gap-3 border-l-4 border-transparent py-2.5 text-on-primary/70 transition-colors hover:bg-white/5 hover:text-on-primary'
+}
+---
+
+<!doctype html>
+<html lang="es" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} | Intercert Latam</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="h-full overflow-hidden bg-dashboard-surface font-sans text-body-md text-on-surface antialiased">
+    <aside
+      class="sidebar-rail fixed left-0 top-0 z-50 hidden h-full flex-col bg-primary py-4 shadow-lg md:flex"
+    >
+      <div class="mb-4 px-2">
+        <div class="brand-mark mx-auto h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-black">
+          <img alt="Intercert" class="h-full w-full object-cover" src={FAVICON_URL} />
+        </div>
+        <div class="brand-full rounded-lg bg-white px-2 py-2">
+          <img alt="Intercert" class="h-8 w-auto max-w-full object-contain object-left" src={LOGO_URL} />
+          <p class="mt-1 text-[10px] font-bold uppercase tracking-wider text-primary/70">
+            Portal de Afiliados
+          </p>
+        </div>
+      </div>
+
+      <div class="mb-4 px-2">
+        <a
+          href="/dashboard/documentos"
+          class="nav-item flex w-full items-center gap-2 rounded-lg bg-secondary-container py-2.5 text-label-md font-semibold text-on-secondary-container shadow-sm transition-colors hover:bg-secondary hover:text-white"
+        >
+          <span class="material-symbols-outlined shrink-0 text-[18px]">add</span>
+          <span class="nav-label">Nueva Solicitud</span>
+        </a>
+      </div>
+
+      <nav class="flex-1 overflow-y-auto overflow-x-hidden">
+        <ul class="space-y-1">
+          {
+            PRIMARY_NAV.map((item) => {
+              const active = isActive(item.href, item.end)
+              return (
+                <li>
+                  <a href={item.href} class={navClass(active)} title={item.label}>
+                    <span class:list={['material-symbols-outlined', 'shrink-0', { fill: active }]} aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span class="nav-label text-label-md">{item.label}</span>
+                  </a>
+                </li>
+              )
+            })
+          }
+        </ul>
+      </nav>
+
+      <div class="mt-auto border-t border-white/10 pt-2">
+        <a
+          href="/dashboard/configuracion"
+          class="nav-item flex items-center gap-3 border-l-4 border-transparent py-2.5 text-on-primary/70 transition-colors hover:bg-white/5 hover:text-on-primary"
+          title="Configuración"
+        >
+          <span class="material-symbols-outlined shrink-0">settings</span>
+          <span class="nav-label text-label-md font-semibold">Configuración</span>
+        </a>
+        <form method="POST" action="/api/logout">
+          <button
+            type="submit"
+            class="nav-item flex w-full items-center gap-3 border-l-4 border-transparent py-2.5 text-on-primary/70 transition-colors hover:bg-white/5 hover:text-on-primary"
+            title="Cerrar sesión"
+          >
+            <span class="material-symbols-outlined shrink-0">logout</span>
+            <span class="nav-label text-label-md font-semibold">Cerrar sesión</span>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <div
+      class="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden md:ml-[72px] md:w-[calc(100%-72px)]"
+    >
+      <header
+        class="z-40 flex h-14 w-full min-w-0 shrink-0 items-center justify-between gap-3 bg-surface px-4 shadow-sm md:px-5"
+      >
+        <div class="flex items-center md:hidden">
+          <button
+            id="open-mobile-nav"
+            type="button"
+            class="rounded-lg p-2 text-on-surface transition-colors hover:bg-surface-container-high"
+            aria-label="Abrir menú"
+          >
+            <span class="material-symbols-outlined">menu</span>
+          </button>
+        </div>
+
+        <div class="ml-2 min-w-0 flex-1 md:ml-0">
+          <div
+            class="relative hidden h-10 w-full max-w-xl overflow-hidden rounded-lg border border-outline-variant bg-surface-container-low transition-all focus-within:border-secondary focus-within:ring-1 focus-within:ring-secondary md:flex md:items-center"
+          >
+            <span class="material-symbols-outlined absolute left-3 text-on-surface-variant">search</span>
+            <input
+              type="text"
+              placeholder="Buscar solicitudes, documentos..."
+              class="h-full w-full border-none bg-transparent pl-10 pr-4 text-body-md text-on-surface outline-none placeholder:text-on-surface-variant"
+            />
+          </div>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            class="relative flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            aria-label="Notificaciones"
+          >
+            <span class="material-symbols-outlined">notifications</span>
+            <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-error"></span>
+          </button>
+          <button
+            type="button"
+            class="flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            aria-label="Ayuda"
+          >
+            <span class="material-symbols-outlined">help_outline</span>
+          </button>
+          <div class="mx-1 hidden h-8 w-px bg-outline-variant sm:block"></div>
+          <a
+            href="/dashboard/perfil"
+            class="flex max-w-[220px] shrink-0 items-center gap-2 rounded-full p-1 pr-2 transition-colors hover:bg-surface-container-high"
+          >
+            <img
+              alt="Avatar del usuario"
+              class="h-8 w-8 shrink-0 rounded-full border border-outline-variant object-cover"
+              src={AVATAR_URL}
+            />
+            <div class="hidden min-w-0 text-left sm:block">
+              <p class="truncate text-label-sm font-bold leading-none text-on-surface">{shortName}</p>
+              <p class="truncate text-[10px] leading-tight text-on-surface-variant">{roleLabel}</p>
+            </div>
+            <span class="material-symbols-outlined shrink-0 text-[18px] text-on-surface-variant">expand_more</span>
+          </a>
+        </div>
+      </header>
+
+      <main class="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-3 md:px-5 md:py-4">
+        <slot />
+      </main>
+    </div>
+
+    <div id="mobile-nav" class="fixed inset-0 z-50 hidden md:hidden">
+      <button
+        id="close-mobile-nav"
+        type="button"
+        class="absolute inset-0 bg-primary/50"
+        aria-label="Cerrar menú"
+      ></button>
+      <nav class="relative z-10 flex h-full w-[260px] flex-col bg-primary py-margin-page">
+        <div class="mb-stack-lg px-gutter">
+          <div class="rounded-lg bg-white px-2 py-2">
+            <img alt="Intercert" class="h-8 w-auto max-w-full object-contain object-left" src={LOGO_URL} />
+          </div>
+          <p class="mt-2 text-label-sm font-bold uppercase tracking-wider text-secondary-fixed opacity-80">
+            Portal de Afiliados
+          </p>
+        </div>
+        <ul class="space-y-1">
+          {
+            PRIMARY_NAV.map((item) => {
+              const active = isActive(item.href, item.end)
+              return (
+                <li>
+                  <a href={item.href} class={navClass(active)}>
+                    <span class="material-symbols-outlined">{item.icon}</span>
+                    <span class="text-label-md">{item.label}</span>
+                  </a>
+                </li>
+              )
+            })
+          }
+        </ul>
+      </nav>
+    </div>
+
+    <script>
+      const drawer = document.getElementById('mobile-nav')
+      document.getElementById('open-mobile-nav')?.addEventListener('click', () => {
+        drawer?.classList.remove('hidden')
+      })
+      document.getElementById('close-mobile-nav')?.addEventListener('click', () => {
+        drawer?.classList.add('hidden')
+      })
+    </script>
+  </body>
+</html>

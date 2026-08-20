@@ -1,0 +1,222 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro'
+
+async function fetchDashboard() {
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const cookieName = Astro.cookies.get('partner_name')?.value
+  const firstName = cookieName?.split(' ')[0] || 'Alex'
+  return { firstName }
+}
+
+const { firstName } = await fetchDashboard()
+
+const requests = [
+  {
+    id: '#REQ-9012',
+    client: 'TechCorp Solutions',
+    standard: 'ISO 27001:2022',
+    date: '12 Oct 2023',
+    status: 'Aprobado',
+    tone: 'ok',
+  },
+  {
+    id: '#REQ-8845',
+    client: 'Logística Global SA',
+    standard: 'ISO 9001:2015',
+    date: '08 Oct 2023',
+    status: 'En Revisión',
+    tone: 'warn',
+  },
+  {
+    id: '#REQ-8711',
+    client: 'Alimentos del Sur',
+    standard: 'ISO 22000:2018',
+    date: '02 Oct 2023',
+    status: 'Documentación',
+    tone: 'info',
+  },
+]
+---
+
+<DashboardLayout title="Dashboard">
+  <div class="flex h-full min-h-0 w-full min-w-0 flex-col gap-3">
+    <div class="shrink-0">
+      <h2 class="text-headline-sm font-bold text-primary md:text-headline-md">¡Hola, {firstName}!</h2>
+      <p class="text-body-md text-on-surface-variant">
+        Resumen de tu actividad reciente en el Portal de Afiliados.
+      </p>
+    </div>
+
+    <div class="grid shrink-0 grid-cols-1 gap-2 md:grid-cols-3">
+      <a
+        href="/dashboard/documentos"
+        class="group flex items-center gap-2.5 rounded-lg bg-primary px-3 py-2 text-left shadow-sm transition-colors hover:bg-primary-container"
+      >
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary-container/20 text-secondary-container"
+        >
+          <span class="material-symbols-outlined fill text-[18px]">add_circle</span>
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-label-md font-bold text-white">Nueva Solicitud</h3>
+          <p class="truncate text-[11px] text-white/70">Inicia una certificación o auditoría.</p>
+        </div>
+      </a>
+
+      <a
+        href="/dashboard/estado"
+        class="group flex items-center gap-2.5 rounded-lg border border-outline-variant bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-surface-container-low"
+      >
+        <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-error-container/50 text-error">
+          <span class="material-symbols-outlined text-[18px]">assignment_late</span>
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-label-md font-bold text-on-surface">Acciones Pendientes</h3>
+          <p class="text-[11px] text-on-surface-variant">
+            <span class="font-bold text-error">3 requeridas</span> · Ver detalles
+          </p>
+        </div>
+      </a>
+
+      <a
+        href="/dashboard/documentos"
+        class="group flex items-center gap-2.5 rounded-lg border border-outline-variant bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-surface-container-low"
+      >
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary-fixed/50 text-secondary"
+        >
+          <span class="material-symbols-outlined text-[18px]">folder_open</span>
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-label-md font-bold text-on-surface">Cargar Documentos</h3>
+          <p class="truncate text-[11px] text-on-surface-variant">Sube evidencia o documentación.</p>
+        </div>
+      </a>
+    </div>
+
+    <div class="grid min-h-0 min-w-0 flex-1 grid-cols-12 gap-3 overflow-hidden">
+      <div class="col-span-12 flex min-h-0 min-w-0 flex-col lg:col-span-8">
+        <div
+          class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-outline-variant bg-white shadow-sm"
+        >
+          <div class="flex shrink-0 items-center justify-between border-b border-outline-variant px-3 py-2">
+            <h3 class="text-label-md font-semibold text-primary">Solicitudes Recientes</h3>
+            <a
+              href="/dashboard/estado"
+              class="text-label-sm font-bold text-secondary transition-colors hover:text-on-secondary-container"
+            >
+              Ver Todas
+            </a>
+          </div>
+          <div class="min-h-0 flex-1 overflow-auto">
+            <table class="w-full border-collapse text-left">
+              <thead>
+                <tr class="border-b border-outline-variant bg-surface-container-low">
+                  <th class="px-3 py-1.5 text-label-sm font-bold uppercase tracking-wider text-on-surface-variant"
+                    >ID</th
+                  >
+                  <th class="px-3 py-1.5 text-label-sm font-bold uppercase tracking-wider text-on-surface-variant"
+                    >Cliente / Norma</th
+                  >
+                  <th class="px-3 py-1.5 text-label-sm font-bold uppercase tracking-wider text-on-surface-variant"
+                    >Fecha</th
+                  >
+                  <th class="px-3 py-1.5 text-label-sm font-bold uppercase tracking-wider text-on-surface-variant"
+                    >Estado</th
+                  >
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-outline-variant/50">
+                {
+                  requests.map((row) => (
+                    <tr class="transition-colors hover:bg-surface-container-low/50">
+                      <td class="whitespace-nowrap px-3 py-1.5 text-body-md font-semibold text-primary">
+                        {row.id}
+                      </td>
+                      <td class="px-3 py-1.5">
+                        <span class="text-label-md font-semibold text-on-surface">{row.client}</span>
+                        <span class="text-[11px] text-on-surface-variant"> · {row.standard}</span>
+                      </td>
+                      <td class="whitespace-nowrap px-3 py-1.5 text-body-md text-on-surface-variant">
+                        {row.date}
+                      </td>
+                      <td class="px-3 py-1.5">
+                        {row.tone === 'ok' && (
+                          <span class="inline-flex items-center gap-1 rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2E7D32]">
+                            <span class="h-1.5 w-1.5 rounded-full bg-[#2E7D32]" />
+                            {row.status}
+                          </span>
+                        )}
+                        {row.tone === 'warn' && (
+                          <span class="inline-flex items-center gap-1 rounded-full bg-[#FFF3E0] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#E65100]">
+                            <span class="h-1.5 w-1.5 rounded-full bg-[#E65100]" />
+                            {row.status}
+                          </span>
+                        )}
+                        {row.tone === 'info' && (
+                          <span class="inline-flex items-center gap-1 rounded-full bg-secondary-fixed px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-on-secondary-container">
+                            <span class="h-1.5 w-1.5 rounded-full bg-secondary" />
+                            {row.status}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-span-12 flex min-h-0 min-w-0 flex-col gap-2 lg:col-span-4">
+        <div class="flex min-h-0 flex-1 flex-col rounded-xl border border-outline-variant bg-white p-3 shadow-sm">
+          <h3 class="mb-2 flex items-center gap-2 text-label-md font-semibold text-primary">
+            <span class="material-symbols-outlined text-[18px] text-secondary">trending_up</span>
+            Mi Desempeño (Q3)
+          </h3>
+          <div class="mt-auto space-y-2 pt-2">
+            <div>
+              <div class="mb-0.5 flex items-end justify-between">
+                <span class="text-label-sm font-semibold text-on-surface">Auditorías Completadas</span>
+                <span class="text-label-sm font-bold text-primary">
+                  12 <span class="font-normal text-on-surface-variant">/ 15</span>
+                </span>
+              </div>
+              <div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+                <div class="h-full rounded-full bg-secondary" style="width: 80%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="mb-0.5 flex items-end justify-between">
+                <span class="text-label-sm font-semibold text-on-surface">Tasa de Aprobación</span>
+                <span class="text-label-sm font-bold text-primary">94%</span>
+              </div>
+              <div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+                <div class="h-full rounded-full bg-primary-container" style="width: 94%"></div>
+              </div>
+            </div>
+          </div>
+          <a
+            href="/dashboard/estado"
+            class="mt-2 block w-full rounded-lg border border-outline-variant py-1.5 text-center text-label-sm font-bold text-on-surface transition-colors hover:bg-surface-container-low"
+          >
+            Ver Informe Detallado
+          </a>
+        </div>
+
+        <div class="rounded-xl border border-primary-container/20 bg-primary-container/5 p-3">
+          <div class="flex items-start gap-2">
+            <span class="material-symbols-outlined mt-0.5 text-[18px] text-primary-container">info</span>
+            <div>
+              <h4 class="text-label-sm font-bold text-primary">Actualización de Sistema</h4>
+              <p class="mt-0.5 text-[12px] leading-snug text-on-surface-variant">
+                Nuevas plantillas ISO 27001 disponibles a partir del lunes.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</DashboardLayout>
