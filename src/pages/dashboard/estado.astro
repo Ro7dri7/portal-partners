@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { DashboardIsland } from '../../islands/DashboardIsland'
+export const prerender = false
+---
+
+<BaseLayout title="Estado de solicitud">
+  <DashboardIsland client:only="react" page="estado">
+    <div class="flex h-full items-center justify-center text-on-surface-variant">Cargando panel...</div>
+  </DashboardIsland>
+</BaseLayout>

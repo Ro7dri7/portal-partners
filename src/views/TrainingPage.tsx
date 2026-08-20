@@ -1,0 +1,75 @@
+import TrainingCatalog, { type TrainingItem } from '../components/TrainingCatalog'
+
+const TRAINING_ITEMS: TrainingItem[] = [
+  {
+    id: 'iso-flow',
+    area: 'operaciones',
+    title: 'Flujo de Emisión ISO',
+    description:
+      'Aprenda el proceso paso a paso para la correcta emisión y validación de certificados bajo los estándares ISO 9001.',
+    tag: 'Proceso ISO',
+    tagTone: 'iso',
+    duration: '12:45',
+    durationSeconds: 12,
+    image:
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuAk604ldHs9fYP8K4K0ep2srOT9FGqIwhOiQPpCt8vnU-1EivLJAE-u696eO7843DoUQREOwZTdtFrG0UlGlEgcgEdmiD5sRQg1qDR2c0ifCGgr_WEP9zpuiXtaWFa8jNf1KoSJaLDbn84sTzP7W0-kxEYZmZcZJAGY6ZCskENUg01xyRQUTPpsJP_BuBViTGxlHVZLSX8bRVXIIS-zxoEckupVmU852xSVZlXyXN653WAEOptnbyYCQw',
+    action: 'play',
+  },
+  {
+    id: 'portal-clients',
+    area: 'operaciones',
+    title: 'Gestión de Clientes en el Portal',
+    description:
+      'Tutorial detallado sobre cómo dar de alta nuevos clientes, actualizar datos y subir documentación probatoria.',
+    tag: 'Gestión',
+    tagTone: 'gestion',
+    duration: '08:20',
+    durationSeconds: 8,
+    image:
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuBAxUytCjKLkjjlp4u8ro5CsR9EsLiFGZFRhnB-_P78UwrPNnV1_86LFarjJUKdD3cz26-57iUR4505_DVJECM0CRsqDVsIz6gFLhpkoKVOov7QzkKpAyiwQ-KSP0Et5dEjmjwkI-okn_YWvsijHO7KklTlXDVB3yeKEdtRaiSDvnUvtxLKhikuATIfW69fhHKTas6SMGj3hdozk8DugAH2LYLe7kV0AvJ1mtlaueYGSde5xdP_ZtsgDg',
+    action: 'download',
+  },
+  {
+    id: 'sales-speech',
+    area: 'comercial',
+    title: 'Speech de Ventas Efectivo',
+    description:
+      'Técnicas de argumentación y manejo de objeciones para ofrecer certificaciones ISO a prospectos B2B.',
+    tag: 'Ventas',
+    tagTone: 'ventas',
+    duration: '15:10',
+    durationSeconds: 15,
+    image:
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuCCG2riP3FP6gAFSJ7vddktcB3C8ZnGP8INezzmrrEZNLTWK1naB8gQXt7O5Y0SJLNs0x_cbSdsCqsuIMYA2-ImaL4ZJ0RpuloS2z_xrw-ydJG_c_HNaN3urmyyTD3iyfrvtFfDowkqmc8I3a2XU1p38itFgDSHtKgtrA-aDrk5p_swmR-6rnCbpmDikM3CE3yqQC9ToMz1zGDfp77f2O9Ytrtvpyn5R-RHmW-YshwjExcRrb9UXb1hIw',
+    action: 'play',
+  },
+  {
+    id: 'quoting',
+    area: 'comercial',
+    title: 'Cómo Cotizar Proyectos',
+    description:
+      'Guía sobre el uso del cotizador interno, cálculo de márgenes y estructuración de propuestas comerciales formales.',
+    tag: 'Administración',
+    tagTone: 'admin',
+    duration: '22:05',
+    durationSeconds: 22,
+    image:
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuBtd-MaNZeNEg52dhuEYiL8AReNAODqO29oTO_gJAn64PQzTaXq-atfUYP98XqRo5pNc91H6lNiO6rcVjWSJoC6vRqxQ8iRS5BrW4HsVE-nYNjG85S7vfPQBRXw958jdXRh25cd3c5fFgZmSp-TX7bK7YgieulZyC2zriKWFe80o8vOjdmMgC3WNXH4Vz4uQ-0CfV_6mz40OoUd67ftc04qpmLgYEcejdpUnJGmj16AIw_9NEXncoDOAw',
+    action: 'play',
+  },
+]
+
+export function TrainingPage() {
+  return (
+    <div className="mx-auto w-full max-w-container-max space-y-4">
+      <section>
+        <h2 className="mb-1 text-headline-md font-bold text-primary">Centro de Capacitación</h2>
+        <p className="text-body-md text-on-surface-variant">
+          Materiales para optimizar tu gestión como Partner: procesos operativos y estrategias
+          comerciales.
+        </p>
+      </section>
+      <TrainingCatalog items={TRAINING_ITEMS} />
+    </div>
+  )
+}

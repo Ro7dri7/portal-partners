@@ -1,44 +1,110 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useOutletContext } from '../app-router'
+import { deleteDocument, fetchProfile, submitDocuments } from '../api'
 import { MaterialIcon } from '../components/MaterialIcon'
 import {
   formatFileSize,
   UploadZone,
   type UploadedFile,
 } from '../components/UploadZone'
+import { saveUser, type PartnerUser } from '../constants'
+
+type DashboardContext = {
+  user: PartnerUser
+  setUser: (user: PartnerUser) => void
+}
 
 export function DocumentsPage() {
+  const { user, setUser } = useOutletContext<DashboardContext>()
   const [files, setFiles] = useState<UploadedFile[]>([])
-  const [submitted, setSubmitted] = useState(false)
+  const [submitted, setSubmitted] = useState(user.documentsSubmitted)
+  const [error, setError] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    fetchProfile()
+      .then((data) => {
+        setFiles(
+          data.documents.map((doc) => ({
+            id: String(doc.id),
+            name: doc.file_name,
+            size: doc.file_size || 0,
+            category: doc.category,
+            status: 'uploaded' as const,
+            documentId: String(doc.id),
+          })),
+        )
+      })
+      .catch(() => {
+        /* keep local list */
+      })
+  }, [])
 
   const addFiles = useCallback((incoming: UploadedFile[]) => {
     setSubmitted(false)
     setFiles((prev) => {
-      const next = [...prev]
+      let next = [...prev]
       for (const file of incoming) {
         if (file.category === 'cv') {
-          // CV is single: replace previous CV
-          const withoutCv = next.filter((f) => f.category !== 'cv')
-          withoutCv.push(file)
-          return withoutCv
+          next = next.filter((item) => item.category !== 'cv' || item.id === file.id)
         }
-        next.push(file)
+        const index = next.findIndex((item) => item.id === file.id)
+        if (index >= 0) next[index] = { ...next[index], ...file }
+        else next.push(file)
       }
       return next
     })
   }, [])
 
   function removeFile(id: string) {
-    setFiles((prev) => prev.filter((f) => f.id !== id))
+    const current = files.find((file) => file.id === id)
+    setFiles((prev) => prev.filter((file) => file.id !== id))
     setSubmitted(false)
+    if (current?.documentId) {
+      void deleteDocument(current.documentId).catch(() => {
+        /* already removed from the list */
+      })
+    }
   }
 
   const validFiles = files.filter((f) => f.status === 'uploaded')
   const hasCv = validFiles.some((f) => f.category === 'cv')
-  const canSubmit = hasCv
+  const uploading = files.some((f) => f.status === 'uploading')
+  const canSubmit = hasCv && !sending && !uploading
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) return
-    setSubmitted(true)
+    setError('')
+    setSending(true)
+    try {
+      const result = await submitDocuments()
+      saveUser(result.user)
+      setUser(result.user)
+      setSubmitted(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo enviar la solicitud.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (user.role !== 'partner_auditor') {
+    return (
+      <div className="mx-auto max-w-container-max">
+        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-stack-lg shadow-level-1">
+          <MaterialIcon name="lock" className="mb-3 text-4xl text-outline" />
+          <h2 className="mb-2 text-headline-lg font-bold text-on-surface">
+            Formulario no habilitado
+          </h2>
+          <p className="mb-4 max-w-2xl text-body-md text-on-surface-variant">
+            El formulario de validación de documentos es exclusivo del rol Partner Auditor.
+          </p>
+          <Link to="/dashboard" className="text-label-md font-semibold text-secondary hover:underline">
+            Volver al inicio
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -56,7 +122,7 @@ export function DocumentsPage() {
           <div className="flex items-start gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low p-4">
             <MaterialIcon name="info" className="mt-0.5 text-secondary" />
             <p className="text-body-md text-on-surface-variant">
-              Formatos aceptados: PDF, JPG, PNG. Máximo 10MB por archivo.
+              Los archivos se guardan en Cloudflare R2. Formatos: PDF, DOC, XLS, JPG, PNG, GIF y ZIP.
             </p>
           </div>
 
@@ -142,7 +208,11 @@ export function DocumentsPage() {
                               file.status === 'error' ? 'text-error' : 'text-secondary'
                             }`}
                           >
-                            {file.status === 'error' ? file.error ?? 'Error' : 'Cargado'}
+                            {file.status === 'error'
+                              ? file.error ?? 'Error'
+                              : file.status === 'uploading'
+                                ? 'Subiendo...'
+                                : 'Guardado en R2'}
                           </span>
                         </div>
                       </div>
@@ -161,13 +231,20 @@ export function DocumentsPage() {
             </div>
 
             <div className="border-t border-outline-variant/30 pt-4">
+              {error && (
+                <p className="mb-3 rounded-lg bg-error-container px-3 py-2 text-body-md text-on-error-container">
+                  {error}
+                </p>
+              )}
               <button
                 type="button"
                 disabled={!canSubmit}
                 onClick={handleSubmit}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-label-md font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <span>{submitted ? 'Solicitud enviada' : 'Enviar solicitud'}</span>
+                <span>
+                  {submitted ? 'Solicitud enviada' : sending ? 'Enviando...' : 'Enviar solicitud'}
+                </span>
                 <MaterialIcon name={submitted ? 'check_circle' : 'send'} className="text-sm" />
               </button>
               <p className="mt-3 text-center text-label-sm font-bold tracking-wide text-on-surface-variant">

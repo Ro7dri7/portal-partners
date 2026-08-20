@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from '../app-router'
+import { loginAccount } from '../api'
+import { postLoginPath, saveSession } from '../auth'
 import { MaterialIcon } from '../components/MaterialIcon'
-import { getUser, LOGIN_HERO_URL, LOGO_URL, saveUser } from '../constants'
+import { LOGIN_HERO_URL, LOGO_URL } from '../constants'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -9,8 +11,9 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
 
@@ -19,21 +22,16 @@ export function LoginPage() {
       return
     }
 
-    const existing = getUser()
-    if (existing && existing.email === email.trim().toLowerCase()) {
-      navigate('/dashboard')
-      return
+    setSubmitting(true)
+    try {
+      const result = await loginAccount(email.trim().toLowerCase(), password)
+      saveSession(result.user, result.token)
+      navigate(postLoginPath(result.user), { replace: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.')
+    } finally {
+      setSubmitting(false)
     }
-
-    // Demo login: allow any valid email/password and create a session
-    const localPart = email.split('@')[0] || 'Partner'
-    const [firstName, ...rest] = localPart.split(/[._-]/)
-    saveUser({
-      firstName: firstName ? capitalize(firstName) : 'Partner',
-      lastName: rest.length ? rest.map(capitalize).join(' ') : '',
-      email: email.trim().toLowerCase(),
-    })
-    navigate('/dashboard')
   }
 
   return (
@@ -57,7 +55,6 @@ export function LoginPage() {
 
       {/* Right form */}
       <div className="flex h-full w-full flex-col items-center justify-center bg-surface p-6 sm:p-12 md:w-1/2">
-        <div className="w-full max-w-md rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-8 shadow-sm">
           <div className="mb-8 flex justify-center">
             <img alt="Intercert Latam Logo" className="h-16 object-contain" src={LOGO_URL} />
           </div>
@@ -69,7 +66,7 @@ export function LoginPage() {
             </p>
           </div>
 
-          <form className="space-y-6" onSubmit={handleSubmit} noValidate>
+          <form className="w-full max-w-md space-y-6" onSubmit={handleSubmit} noValidate>
             <div>
               <label
                 className="mb-2 block text-label-md font-semibold text-on-surface-variant"
@@ -146,9 +143,10 @@ export function LoginPage() {
             <div className="pt-4">
               <button
                 type="submit"
-                className="flex w-full justify-center rounded-lg border border-transparent bg-primary px-4 py-3 text-label-md font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                disabled={submitting}
+                className="flex w-full justify-center rounded-lg border border-transparent bg-primary px-4 py-3 text-label-md font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50"
               >
-                Iniciar sesión
+                {submitting ? 'Ingresando...' : 'Iniciar sesión'}
               </button>
             </div>
           </form>
@@ -162,7 +160,6 @@ export function LoginPage() {
               Regístrate
             </Link>
           </p>
-        </div>
 
         <div className="mt-8 flex justify-center space-x-6 text-label-sm font-bold tracking-wide text-on-surface-variant">
           <a className="transition-colors hover:text-primary" href="#">
@@ -180,7 +177,4 @@ export function LoginPage() {
   )
 }
 
-function capitalize(value: string) {
-  if (!value) return value
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
+

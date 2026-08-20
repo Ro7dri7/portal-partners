@@ -1,0 +1,9 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { AdminRequestsPage } from '../../views/AdminRequestsPage'
+export const prerender = false
+---
+
+<BaseLayout title="Solicitudes">
+  <AdminRequestsPage client:only="react" />
+</BaseLayout>

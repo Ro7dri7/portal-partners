@@ -1,0 +1,9 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { RegisterPage } from '../../views/RegisterPage'
+export const prerender = false
+---
+
+<BaseLayout title="Crear cuenta">
+  <RegisterPage client:only="react" />
+</BaseLayout>

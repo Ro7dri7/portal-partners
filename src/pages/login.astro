@@ -1,0 +1,14 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import { LoginPage } from '../views/LoginPage'
+
+export const prerender = false
+
+if (Astro.cookies.get('auth_token')?.value) {
+  return Astro.redirect('/dashboard')
+}
+---
+
+<BaseLayout title="Iniciar sesión">
+  <LoginPage client:only="react" />
+</BaseLayout>

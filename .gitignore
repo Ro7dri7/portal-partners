@@ -9,8 +9,12 @@ lerna-debug.log*
 
 node_modules
 dist
+.astro
 dist-ssr
 *.local
+.env
+_setup_db.py
+_alter_db.py
 
 # Editor directories and files
 .vscode/*

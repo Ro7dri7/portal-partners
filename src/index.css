@@ -41,6 +41,9 @@
   --color-warning: #f57f17;
   --color-warning-bg: #fff8e1;
   --color-warning-border: #ffe082;
+  --color-on-tertiary-fixed: #3b0900;
+  --color-tertiary-fixed: #ffdbd1;
+  --color-on-secondary-fixed: #001f27;
 
   --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
 

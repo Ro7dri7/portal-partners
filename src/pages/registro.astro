@@ -1,0 +1,9 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import { RoleSelectPage } from '../views/RoleSelectPage'
+export const prerender = false
+---
+
+<BaseLayout title="Registro">
+  <RoleSelectPage client:only="react" />
+</BaseLayout>
