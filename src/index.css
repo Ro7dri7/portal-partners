@@ -53,6 +53,7 @@
   --spacing-stack-md: 16px;
   --spacing-stack-lg: 24px;
   --spacing-sidebar-width: 260px;
+  --spacing-sidebar-collapsed: 72px;
   --spacing-container-max: 1440px;
 
   --text-body-md: 14px;
@@ -120,4 +121,53 @@
 
 .animate-fade-in {
   animation: fadeIn 0.5s ease-out;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+}
+
+.sidebar-rail {
+  width: var(--spacing-sidebar-collapsed);
+  overflow: hidden;
+  transition: width 220ms ease;
+}
+
+.sidebar-rail:hover,
+.sidebar-rail:focus-within {
+  width: var(--spacing-sidebar-width);
+}
+
+.sidebar-rail .brand-mark {
+  display: flex;
+}
+
+.sidebar-rail .brand-full,
+.sidebar-rail .nav-label {
+  display: none;
+  white-space: nowrap;
+}
+
+.sidebar-rail:hover .brand-mark,
+.sidebar-rail:focus-within .brand-mark {
+  display: none;
+}
+
+.sidebar-rail:hover .brand-full,
+.sidebar-rail:focus-within .brand-full,
+.sidebar-rail:hover .nav-label,
+.sidebar-rail:focus-within .nav-label {
+  display: block;
+}
+
+.sidebar-rail .nav-item {
+  justify-content: center;
+  padding-inline: 0.5rem;
+}
+
+.sidebar-rail:hover .nav-item,
+.sidebar-rail:focus-within .nav-item {
+  justify-content: flex-start;
+  padding-inline: 1rem 0.75rem;
 }

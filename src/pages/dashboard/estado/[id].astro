@@ -1,0 +1,21 @@
+---
+import DashboardLayout from '../../../layouts/DashboardLayout.astro'
+import ApplicationStatus from '../../../components/ApplicationStatus'
+
+const { id } = Astro.params
+const applicantName = Astro.cookies.get('partner_name')?.value ?? 'Partner'
+---
+
+<DashboardLayout title={`Solicitud ${id}`}>
+  <div class="mb-6">
+    <a
+      href="/dashboard/estado"
+      class="inline-flex items-center gap-1 text-label-md font-semibold text-secondary hover:underline"
+    >
+      <span class="material-symbols-outlined text-[18px]">arrow_back</span>
+      Volver al listado
+    </a>
+    <p class="mt-2 text-label-md text-on-surface-variant">Solicitud {id}</p>
+  </div>
+  <ApplicationStatus client:only="react" applicantName={applicantName} />
+</DashboardLayout>
