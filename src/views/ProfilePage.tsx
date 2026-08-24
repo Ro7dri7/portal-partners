@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useOutletContext } from '../app-router'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useOutletContext } from '../app-router'
 import {
-  createAudit,
-  deleteAudit,
   deleteDocument,
   fetchProfile,
   submitReview1,
   submitReview2,
-  updateAudit,
-  type AuditorAudit,
   type ProfessionalProfile,
   type Review2Status,
   type ReviewStatus,
@@ -56,30 +52,15 @@ const REVIEW1_DOCS = [
     key: 'audits_relation',
     category: 'audits_relation',
     title: 'Relación de auditorías realizadas como Auditor Líder',
-    description: 'Documento con el listado de auditorías ejecutadas como Auditor Líder. Solo PDF.',
+    description:
+      'Registra organización auditada, norma, fechas, días, tipo, rol como Auditor Líder y área técnica',
     icon: 'assignment',
     acceptPdfOnly: true,
     multiple: false,
   },
 ] as const
 
-const AUDIT_TYPES = ['Inicial', 'Seguimiento', 'Recertificación', 'Transición', 'Extraordinaria']
-
 const ICF12_URL = '/formats/IC.F.1.2-Application-and-Auditor-Registration-Initial.docx'
-
-const inputClass =
-  'w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5 text-body-md text-on-surface outline-none transition-colors placeholder:text-outline-variant focus:border-secondary focus:ring-1 focus:ring-secondary'
-
-const emptyAuditDraft: Omit<AuditorAudit, 'id'> = {
-  organization: '',
-  standard: '',
-  startDate: '',
-  endDate: '',
-  days: '',
-  auditType: '',
-  role: 'Auditor Líder',
-  iafCode: '',
-}
 
 function itemStatus(
   ready: boolean,
@@ -88,33 +69,21 @@ function itemStatus(
 ): ReviewTaskStatus {
   if (locked) return 'locked'
   if (reviewStatus === 'approved') return 'approved'
-  if (reviewStatus === 'in_review') return ready ? 'in_review' : 'pending'
   if (reviewStatus === 'rejected') return ready ? 'ready' : 'rejected'
+  if (
+    reviewStatus === 'in_review' ||
+    reviewStatus === 'sent' ||
+    reviewStatus === 'validated'
+  ) {
+    return ready ? 'in_review' : 'pending'
+  }
   return ready ? 'ready' : 'pending'
-}
-
-function isAuditComplete(audit: Omit<AuditorAudit, 'id'> | AuditorAudit) {
-  const days = Number(audit.days)
-  return Boolean(
-    audit.organization.trim() &&
-      audit.standard.trim() &&
-      audit.startDate.trim() &&
-      audit.endDate.trim() &&
-      Number.isFinite(days) &&
-      days > 0 &&
-      audit.auditType.trim() &&
-      audit.role.trim() &&
-      audit.iafCode.trim(),
-  )
 }
 
 export function ProfilePage() {
   const { user, setUser } = useOutletContext<DashboardContext>()
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [files, setFiles] = useState<UploadedFile[]>([])
-  const [audits, setAudits] = useState<AuditorAudit[]>([])
-  const [draft, setDraft] = useState(emptyAuditDraft)
-  const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const isAuditor = user.role === 'partner_auditor'
@@ -124,7 +93,6 @@ export function ProfilePage() {
     fetchProfile()
       .then((data) => {
         setProfile(data.profile)
-        setAudits(data.audits || [])
         setFiles(
           data.documents.map((doc) => ({
             id: String(doc.id),
@@ -171,57 +139,18 @@ export function ProfilePage() {
   const validFiles = files.filter((file) => file.status === 'uploaded')
   const review1Status = profile?.review1Status || 'pending'
   const review2Status = profile?.review2Status || 'locked'
-  const review1Locked = review1Status === 'in_review' || review1Status === 'approved'
+  const review1Locked = ['sent', 'in_review', 'validated', 'approved'].includes(review1Status)
   const review2Locked = review2Status === 'locked'
-  const review2Frozen = review2Status === 'in_review' || review2Status === 'approved'
+  const review2Frozen = ['sent', 'in_review', 'validated', 'approved'].includes(review2Status)
   const review2Open = review1Status === 'approved'
 
-  const review1Ready = useMemo(() => {
-    const docsReady = REVIEW1_DOCS.every((doc) =>
-      validFiles.some((file) => file.category === doc.category),
-    )
-    return docsReady && audits.some((audit) => isAuditComplete(audit))
-  }, [validFiles, audits])
+  const review1Ready = useMemo(
+    () =>
+      REVIEW1_DOCS.every((doc) => validFiles.some((file) => file.category === doc.category)),
+    [validFiles],
+  )
 
   const icf12Ready = validFiles.some((file) => file.category === 'icf12')
-
-  async function handleSaveAudit() {
-    setError('')
-    if (!isAuditComplete(draft)) {
-      setError('Completa todos los campos de la auditoría, incluido el código IAF.')
-      return
-    }
-    setSaving(true)
-    try {
-      if (editingId) {
-        const result = await updateAudit(editingId, draft)
-        setAudits((prev) => prev.map((item) => (item.id === editingId ? result.audit : item)))
-      } else {
-        const result = await createAudit(draft)
-        setAudits((prev) => [...prev, result.audit])
-      }
-      setDraft(emptyAuditDraft)
-      setEditingId(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar la auditoría.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleDeleteAudit(id: string) {
-    setError('')
-    try {
-      await deleteAudit(id)
-      setAudits((prev) => prev.filter((item) => item.id !== id))
-      if (editingId === id) {
-        setDraft(emptyAuditDraft)
-        setEditingId(null)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la auditoría.')
-    }
-  }
 
   async function handleSubmitReview1() {
     setError('')
@@ -230,7 +159,7 @@ export function ProfilePage() {
       return
     }
     if (!review1Ready) {
-      setError('Completa los cinco puntos de la revisión 1 antes de enviarla.')
+      setError('Completa los cuatro puntos de la revisión 1 antes de enviarla.')
       return
     }
     setSaving(true)
@@ -248,6 +177,14 @@ export function ProfilePage() {
 
   async function handleSubmitReview2() {
     setError('')
+    if (files.some((file) => file.status === 'uploading')) {
+      setError('Espera a que terminen de subirse los archivos.')
+      return
+    }
+    if (review2Locked || review1Status !== 'approved') {
+      setError('La revisión 2 se habilita cuando Operaciones apruebe la revisión 1.')
+      return
+    }
     if (!icf12Ready) {
       setError('Sube el formato IC.F.1.2 completado antes de enviarlo.')
       return
@@ -267,66 +204,24 @@ export function ProfilePage() {
 
   if (!isAuditor) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto pb-12">
         <header className="mb-6">
           <p className="mb-1 text-label-sm font-bold uppercase tracking-[0.16em] text-secondary">
             Afiliado
           </p>
           <h2 className="text-headline-lg font-bold tracking-tight text-primary">Mi perfil</h2>
-          <p className="mt-1 text-body-md text-on-surface-variant">
-            El formulario de validación es exclusivo para Partner Auditor.
-          </p>
         </header>
-        <div className="max-w-xl rounded-2xl border border-outline-variant/40 bg-white p-6 shadow-level-1">
-          <div className="mb-5 flex items-center gap-3">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary-container/30 text-secondary">
-              <MaterialIcon name="person" />
-            </span>
-            <div>
-              <p className="text-body-lg font-bold text-on-surface">
-                {user.firstName} {user.lastName}
-              </p>
-              <p className="text-body-md text-on-surface-variant">{user.email}</p>
-            </div>
-          </div>
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <dt className="text-label-md font-semibold text-on-surface-variant">Rol</dt>
-              <dd className="text-body-md text-on-surface">Afiliado</dd>
-            </div>
-            <div>
-              <dt className="text-label-md font-semibold text-on-surface-variant">
-                Solicitud Partner Auditor
-              </dt>
-              <dd className="text-body-md text-on-surface">
-                {user.auditorRequestStatus === 'pending'
-                  ? 'En revisión'
-                  : user.auditorRequestStatus === 'rejected'
-                    ? 'No aprobada'
-                    : user.auditorRequestStatus === 'approved'
-                      ? 'Aprobada'
-                      : 'Sin solicitud'}
-              </dd>
-            </div>
-          </dl>
-          <Link
-            to="/dashboard"
-            className="mt-6 inline-flex text-label-md font-semibold text-secondary hover:underline"
-          >
-            Volver al inicio
-          </Link>
-        </div>
       </div>
     )
   }
 
-  const review1DoneCount =
-    REVIEW1_DOCS.filter((doc) => validFiles.some((file) => file.category === doc.category)).length +
-    (audits.some((audit) => isAuditComplete(audit)) ? 1 : 0)
-  const review1Total = REVIEW1_DOCS.length + 1
-  const firstPendingKey =
-    REVIEW1_DOCS.find((doc) => !validFiles.some((file) => file.category === doc.category))?.key ||
-    (audits.some((audit) => isAuditComplete(audit)) ? null : 'audits')
+  const review1DoneCount = REVIEW1_DOCS.filter((doc) =>
+    validFiles.some((file) => file.category === doc.category),
+  ).length
+  const review1Total = REVIEW1_DOCS.length
+  const firstPendingKey = REVIEW1_DOCS.find(
+    (doc) => !validFiles.some((file) => file.category === doc.category),
+  )?.key
 
   const banner =
     review2Status === 'approved'
@@ -336,10 +231,22 @@ export function ProfilePage() {
           steps: 2,
           tone: 'mint' as const,
         }
-      : review2Status === 'in_review'
+      : review2Status === 'in_review' ||
+          review2Status === 'sent' ||
+          review2Status === 'validated'
         ? {
-            title: 'Formato IC.F.1.2 enviado',
-            description: 'El equipo técnico está revisando tu Application and Auditor Registration.',
+            title:
+              review2Status === 'validated'
+                ? 'Formato IC.F.1.2 validado'
+                : review2Status === 'sent'
+                  ? 'Formato IC.F.1.2 enviado'
+                  : 'Formato IC.F.1.2 en revisión',
+            description:
+              review2Status === 'validated'
+                ? 'Operaciones validó tu formato. Pronto recibirás la respuesta final.'
+                : review2Status === 'sent'
+                  ? 'Tu solicitud de fase 2 fue enviada. Esperando que Operaciones la tome en revisión.'
+                  : 'El equipo de Operaciones está revisando tu Application and Auditor Registration.',
             steps: 1,
             tone: 'mint' as const,
           }
@@ -423,169 +330,6 @@ export function ProfilePage() {
               </ReviewTaskCard>
             )
           })}
-
-          <ReviewTaskCard
-            title="Información detallada de las auditorías"
-            description="Registra organización auditada, norma, fechas, días, tipo, rol como Auditor Líder y área técnica / código IAF."
-            icon="fact_check"
-            status={itemStatus(audits.some((audit) => isAuditComplete(audit)), review1Status)}
-            defaultOpen={firstPendingKey === 'audits'}
-          >
-            <div className="space-y-4">
-              {audits.length > 0 && (
-                <ul className="space-y-2">
-                  {audits.map((audit) => (
-                    <li
-                      key={audit.id}
-                      className="rounded-xl border border-outline-variant/40 bg-white px-4 py-3 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex gap-3">
-                          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary-container/20 text-secondary">
-                            <MaterialIcon name="verified" className="text-[18px]" />
-                          </span>
-                          <div>
-                            <p className="text-label-md font-bold text-on-surface">
-                              {audit.organization || 'Sin organización'}
-                            </p>
-                            <p className="text-body-md text-on-surface-variant">
-                              {audit.standard || 'Sin norma'} · {audit.auditType || 'Sin tipo'} · IAF{' '}
-                              {audit.iafCode || '—'}
-                            </p>
-                            <p className="text-label-sm text-outline">
-                              {audit.startDate || '—'} — {audit.endDate || '—'} · {audit.days || '—'}{' '}
-                              días · {audit.role}
-                            </p>
-                          </div>
-                        </div>
-                        {!review1Locked && (
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container hover:text-secondary"
-                              onClick={() => {
-                                setEditingId(audit.id)
-                                setDraft({
-                                  organization: audit.organization,
-                                  standard: audit.standard,
-                                  startDate: audit.startDate,
-                                  endDate: audit.endDate,
-                                  days: audit.days,
-                                  auditType: audit.auditType,
-                                  role: audit.role,
-                                  iafCode: audit.iafCode,
-                                })
-                              }}
-                              aria-label="Editar auditoría"
-                            >
-                              <MaterialIcon name="edit" className="text-[18px]" />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-full p-1.5 text-on-surface-variant hover:bg-error-container/40 hover:text-error"
-                              onClick={() => void handleDeleteAudit(audit.id)}
-                              aria-label="Eliminar auditoría"
-                            >
-                              <MaterialIcon name="delete" className="text-[18px]" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {!review1Locked && (
-                <div className="rounded-xl border border-outline-variant/40 bg-white p-4">
-                  <p className="mb-3 text-label-md font-bold text-on-surface">
-                    {editingId ? 'Editar auditoría' : 'Nueva auditoría'}
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Organización auditada">
-                    <input
-                      className={inputClass}
-                      value={draft.organization}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, organization: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Norma auditada">
-                    <input
-                      className={inputClass}
-                      placeholder="Ej. ISO 9001"
-                      value={draft.standard}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, standard: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Fecha de inicio">
-                    <input
-                      type="date"
-                      className={inputClass}
-                      value={draft.startDate}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, startDate: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Fecha de fin">
-                    <input
-                      type="date"
-                      className={inputClass}
-                      value={draft.endDate}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, endDate: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Número de días">
-                    <input
-                      type="number"
-                      min={1}
-                      className={inputClass}
-                      value={draft.days}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, days: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Tipo de auditoría">
-                    <select
-                      className={inputClass}
-                      value={draft.auditType}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, auditType: e.target.value }))}
-                    >
-                      <option value="">Selecciona</option>
-                      {AUDIT_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Rol como Auditor Líder">
-                    <input
-                      className={inputClass}
-                      value={draft.role}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, role: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label="Área técnica / Código IAF">
-                    <input
-                      className={inputClass}
-                      placeholder="Ej. 17 / 29"
-                      value={draft.iafCode}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, iafCode: e.target.value }))}
-                    />
-                  </Field>
-                  <div className="sm:col-span-2">
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={() => void handleSaveAudit()}
-                      className="rounded-lg bg-primary px-4 py-2.5 text-label-md font-semibold text-on-primary disabled:opacity-50"
-                    >
-                      {editingId ? 'Actualizar auditoría' : 'Agregar auditoría'}
-                    </button>
-                  </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </ReviewTaskCard>
         </div>
 
         {review1Status === 'pending' || review1Status === 'rejected' ? (
@@ -595,7 +339,7 @@ export function ProfilePage() {
               <p className="text-body-md text-on-surface-variant">
                 {review1Ready
                   ? 'Documentación lista. Intercert evaluará estos puntos.'
-                  : 'Completa los cinco puntos para habilitar el envío.'}
+                  : 'Completa los cuatro puntos para habilitar el envío.'}
               </p>
             </div>
             <button
@@ -607,9 +351,13 @@ export function ProfilePage() {
               {saving ? 'Enviando...' : 'Enviar a revisión'}
             </button>
           </div>
-        ) : review1Status === 'in_review' ? (
+        ) : review1Locked && review1Status !== 'approved' ? (
           <div className="mt-5 rounded-2xl border border-warning-border bg-warning-bg px-5 py-4 text-body-md text-on-surface">
-            Documentación enviada. El equipo de Intercert está revisando estos puntos.
+            {review1Status === 'sent'
+              ? 'Documentación enviada. Esperando que Operaciones la tome en revisión.'
+              : review1Status === 'validated'
+                ? 'Documentación validada. Esperando la respuesta final de Operaciones.'
+                : 'Documentación en revisión por el equipo de Operaciones.'}
           </div>
         ) : null}
       </section>
@@ -714,31 +462,39 @@ export function ProfilePage() {
           </ReviewTaskCard>
         </div>
 
-        {review2Open && (review2Status === 'pending' || review2Status === 'rejected') && (
-          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-outline-variant/40 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+        {!review2Frozen && (
+          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-label-md font-bold text-on-surface">Enviar formato IC.F.1.2</p>
+              <p className="text-label-md font-bold text-on-surface">Enviar revisión 2</p>
               <p className="text-body-md text-on-surface-variant">
-                {icf12Ready
-                  ? 'El formato está listo para la segunda revisión.'
-                  : 'Descarga, completa y sube el Word para habilitar el envío.'}
+                {review2Locked
+                  ? 'Se habilita cuando Operaciones apruebe la revisión 1.'
+                  : icf12Ready
+                    ? 'Formato listo. Se creará una solicitud de Fase 2 en Operaciones.'
+                    : 'Descarga, completa y sube el Word para habilitar el envío.'}
               </p>
             </div>
             <button
               type="button"
-              disabled={saving || !icf12Ready}
+              disabled={saving || !icf12Ready || review2Locked}
               onClick={() => void handleSubmitReview2()}
               className="shrink-0 rounded-lg bg-primary px-5 py-2.5 text-label-md font-semibold text-on-primary disabled:opacity-50"
             >
-              {saving ? 'Enviando...' : 'Enviar formato'}
+              {saving ? 'Enviando...' : 'Enviar a revisión'}
             </button>
           </div>
         )}
-        {review2Status === 'in_review' && (
+        {review2Status === 'in_review' ||
+        review2Status === 'sent' ||
+        review2Status === 'validated' ? (
           <div className="mt-5 rounded-2xl border border-warning-border bg-warning-bg px-5 py-4 text-body-md text-on-surface">
-            El formato IC.F.1.2 está en revisión por el equipo técnico.
+            {review2Status === 'sent'
+              ? 'Formato IC.F.1.2 enviado. Esperando que Operaciones lo tome en revisión.'
+              : review2Status === 'validated'
+                ? 'Formato validado. Esperando la respuesta final de Operaciones.'
+                : 'El formato IC.F.1.2 está en revisión por el equipo de Operaciones.'}
           </div>
-        )}
+        ) : null}
       </section>
 
       {error && (
@@ -747,18 +503,6 @@ export function ProfilePage() {
         </p>
       )}
     </div>
-  )
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="text-label-md font-semibold text-on-surface">
-        {label}
-        <span className="text-error"> *</span>
-      </span>
-      {children}
-    </label>
   )
 }
 

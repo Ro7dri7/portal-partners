@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useOutletContext } from '../app-router'
-import { fetchProfile, postStatusComment, type ProfessionalProfile } from '../api'
+import {
+  fetchProfile,
+  postStatusComment,
+  type ProfessionalProfile,
+  type StatusComment,
+} from '../api'
 import { MaterialIcon } from '../components/MaterialIcon'
 import type { PartnerUser } from '../constants'
 import {
@@ -12,14 +17,6 @@ type DashboardContext = {
   user: PartnerUser
 }
 
-type StatusComment = {
-  id: string
-  authorRole: 'coordinator' | 'applicant'
-  authorName: string
-  body: string
-  createdAt: string
-}
-
 function formatStamp(value: string) {
   return new Intl.DateTimeFormat('es', {
     day: 'numeric',
@@ -29,11 +26,101 @@ function formatStamp(value: string) {
   }).format(new Date(value))
 }
 
+function formatDeadline(value: string) {
+  return new Intl.DateTimeFormat('es-PE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function ActivityComment({ comment }: { comment: StatusComment }) {
+  const labels = comment.referencedDocLabels?.length
+    ? comment.referencedDocLabels
+    : comment.referencedDocs || []
+  const hasDeadline = Boolean(comment.deadlineAt || comment.deadlineLabel)
+  const deadlineText = comment.deadlineAt
+    ? formatDeadline(comment.deadlineAt)
+    : comment.deadlineLabel || ''
+  const overdue =
+    Boolean(comment.deadlineAt) && new Date(comment.deadlineAt as string).getTime() < Date.now()
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        comment.authorRole === 'applicant'
+          ? 'ml-4 border-secondary/20 bg-secondary-container/10'
+          : 'mr-4 border-outline-variant/20 bg-surface'
+      }`}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-label-md font-bold text-primary">{comment.authorName}</span>
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+            {comment.authorRole === 'coordinator' ? 'Coordinador' : 'Solicitante'}
+          </span>
+        </div>
+        <span className="shrink-0 text-label-sm font-bold tracking-wide text-on-surface-variant">
+          {formatStamp(comment.createdAt)}
+        </span>
+      </div>
+
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-on-surface">
+        {comment.body}
+      </p>
+
+      {labels.length > 0 && (
+        <div className="mt-3 rounded-md border border-outline-variant/30 bg-surface-container-low/80 p-2.5">
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">
+            Documentos observados
+          </p>
+          <ul className="space-y-1">
+            {labels.map((label) => (
+              <li key={label} className="flex items-start gap-1.5 text-sm text-on-surface">
+                <MaterialIcon name="description" className="mt-0.5 text-[16px] text-secondary" />
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {hasDeadline && (
+        <div
+          className={`mt-3 rounded-md border px-3 py-2.5 ${
+            overdue
+              ? 'border-error/50 bg-error-container/40 text-on-error-container'
+              : 'border-[#dc2626]/35 bg-[#fef2f2] text-[#991b1b]'
+          }`}
+          role="status"
+        >
+          <div className="flex items-start gap-2">
+            <MaterialIcon name="alarm" className="mt-0.5 text-[18px]" />
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide">
+                {overdue ? 'Plazo vencido' : 'Plazo de corrección'}
+                {comment.deadlineDurationLabel ? ` · ${comment.deadlineDurationLabel}` : ''}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold">
+                {overdue ? `Venció ${deadlineText}` : `Vence ${deadlineText}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ApplicationStatusPage() {
   const { user } = useOutletContext<DashboardContext>()
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [documents, setDocuments] = useState<Array<{ category: string; file_name: string }>>([])
-  const [application, setApplication] = useState<{ publicCode: string; status: string } | null>(null)
+  const [application, setApplication] = useState<{ publicCode: string; status: string } | null>(
+    null,
+  )
   const [comments, setComments] = useState<StatusComment[]>([])
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
@@ -135,8 +222,6 @@ export function ApplicationStatusPage() {
     )
   }
 
-  const barWidth = `${progress.percent}%`
-
   return (
     <div className="mx-auto max-w-container-max">
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -167,35 +252,89 @@ export function ApplicationStatusPage() {
                 <p className="text-body-md text-on-surface-variant">{progress.description}</p>
               </div>
               <div className="inline-flex items-center gap-2 self-start rounded-full border border-warning-border bg-warning-bg px-4 py-1.5 text-warning">
-                <MaterialIcon name={progress.submitted ? 'pending' : 'edit'} filled className="text-[16px]" />
-                <span className="text-label-sm font-bold uppercase tracking-wider">{progress.badge}</span>
+                <MaterialIcon
+                  name={progress.submitted ? 'pending' : 'edit'}
+                  filled
+                  className="text-[16px]"
+                />
+                <span className="text-label-sm font-bold uppercase tracking-wider">
+                  {progress.badge}
+                </span>
               </div>
             </div>
 
-            <div className="relative py-8">
-              <div className="absolute left-8 right-8 top-1/2 z-0 h-1 -translate-y-1/2 rounded-full bg-surface-variant" />
-              <div
-                className="absolute left-8 top-1/2 z-0 h-1 -translate-y-1/2 rounded-full bg-secondary transition-all duration-500"
-                style={{ width: barWidth }}
-              />
-              <div className="relative z-10 flex w-full items-center justify-between">
-                {progress.phases.map((phase, index) => (
-                  <Step
-                    key={phase.key}
-                    state={phase.state}
-                    label={phase.label}
-                    sublabel={phase.detail}
-                    icon={phase.state === 'done' ? 'check' : phase.state === 'active' ? 'autorenew' : undefined}
-                    number={index + 1}
-                  />
-                ))}
-              </div>
+            <div className="space-y-8">
+              {progress.phaseTracks.map((track) => (
+                <div
+                  key={track.key}
+                  className={track.unlocked ? '' : 'opacity-55'}
+                >
+                  <div className="mb-4">
+                    <h4 className="text-headline-sm font-semibold text-primary">{track.label}</h4>
+                    <p className="text-body-md text-on-surface-variant">{track.subtitle}</p>
+                    {!track.unlocked && (
+                      <p className="mt-1 text-label-md font-semibold text-on-surface-variant">
+                        Se habilita al completar la respuesta final de la fase 1.
+                      </p>
+                    )}
+                  </div>
+                  <div className="relative py-6">
+                    <div className="absolute left-6 right-6 top-1/2 z-0 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-surface-variant">
+                      <div
+                        className="h-full rounded-full bg-secondary transition-all duration-500"
+                        style={{
+                          width: `${(() => {
+                            const lastIdx = track.steps.reduce(
+                              (acc, step, index) =>
+                                step.state === 'done' ||
+                                step.state === 'active' ||
+                                step.state === 'rejected'
+                                  ? index
+                                  : acc,
+                              0,
+                            )
+                            const max = Math.max(track.steps.length - 1, 1)
+                            return Math.min(100, Math.max(0, (lastIdx / max) * 100))
+                          })()}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="relative z-10 flex w-full items-start justify-between">
+                      {track.steps.map((step, index) => (
+                        <Step
+                          key={step.key}
+                          state={
+                            step.state === 'rejected'
+                              ? 'rejected'
+                              : step.state === 'done'
+                                ? 'done'
+                                : step.state === 'active'
+                                  ? 'active'
+                                  : 'pending'
+                          }
+                          label={step.label}
+                          icon={
+                            step.state === 'done'
+                              ? 'check'
+                              : step.state === 'rejected'
+                                ? 'close'
+                                : step.state === 'active'
+                                  ? 'autorenew'
+                                  : undefined
+                          }
+                          number={index + 1}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
 
             {!progress.review1Done && (
               <Link
                 to="/dashboard/perfil"
-                className="inline-flex rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90"
+                className="mt-2 inline-flex rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90"
               >
                 Continuar validación
               </Link>
@@ -203,7 +342,7 @@ export function ApplicationStatusPage() {
             {progress.review1Done && !progress.review2Done && (
               <Link
                 to="/dashboard/perfil"
-                className="inline-flex rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90"
+                className="mt-2 inline-flex rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90"
               >
                 Continuar con IC.F.1.2
               </Link>
@@ -214,9 +353,16 @@ export function ApplicationStatusPage() {
             <h3 className="mb-4 text-headline-sm font-semibold text-primary">Avance del formulario</h3>
             <ul className="space-y-3">
               <ChecklistItem done={progress.review1Docs} label="Documentos de la revisión 1" />
-              <ChecklistItem done={progress.review1Status === 'in_review' || progress.review1Done} label="Revisión 1 enviada" />
-              <ChecklistItem done={progress.review1Done} label="Revisión 1 aprobada" />
-              <ChecklistItem done={progress.review2Done || progress.review2Status === 'in_review'} label="Formato IC.F.1.2 enviado" />
+              <ChecklistItem
+                done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review1Status)}
+                label="Revisión 1 enviada"
+              />
+              <ChecklistItem done={progress.review1Done} label="Respuesta final fase 1" />
+              <ChecklistItem
+                done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review2Status)}
+                label="Formato IC.F.1.2 enviado"
+              />
+              <ChecklistItem done={progress.review2Done} label="Respuesta final fase 2" />
             </ul>
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-label-md">
@@ -224,7 +370,10 @@ export function ApplicationStatusPage() {
                 <span className="font-semibold text-secondary">{progress.percent}%</span>
               </div>
               <div className="h-2.5 overflow-hidden rounded-full bg-surface-variant">
-                <div className="h-2.5 rounded-full bg-secondary" style={{ width: `${progress.percent}%` }} />
+                <div
+                  className="h-2.5 rounded-full bg-secondary"
+                  style={{ width: `${progress.percent}%` }}
+                />
               </div>
             </div>
           </div>
@@ -237,41 +386,22 @@ export function ApplicationStatusPage() {
               <h3 className="text-headline-sm font-semibold text-primary">Actividad</h3>
             </div>
 
-            <div ref={listRef} className="mb-4 max-h-[280px] flex-1 space-y-4 overflow-y-auto">
+            <div ref={listRef} className="mb-4 max-h-[360px] flex-1 space-y-4 overflow-y-auto">
               {progress.activity.map((item) => (
-                <div key={item} className="mr-4 rounded-lg border border-outline-variant/20 bg-surface p-3">
+                <div
+                  key={item}
+                  className="mr-4 rounded-lg border border-outline-variant/20 bg-surface p-3"
+                >
                   <p className="text-label-md font-bold text-primary">Sistema</p>
                   <p className="text-sm text-on-surface-variant">{item}</p>
                 </div>
               ))}
               {comments.map((comment) => (
-                <div
-                  key={comment.id}
-                  className={`rounded-lg border p-3 ${
-                    comment.authorRole === 'applicant'
-                      ? 'ml-4 border-secondary/20 bg-secondary-container/10'
-                      : 'mr-4 border-outline-variant/20 bg-surface'
-                  }`}
-                >
-                  <div className="mb-1 flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-label-md font-bold text-primary">{comment.authorName}</span>
-                      <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
-                        {comment.authorRole === 'coordinator' ? 'Coordinador' : 'Solicitante'}
-                      </span>
-                    </div>
-                    <span className="shrink-0 text-label-sm font-bold tracking-wide text-on-surface-variant">
-                      {formatStamp(comment.createdAt)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-on-surface-variant">{comment.body}</p>
-                </div>
+                <ActivityComment key={comment.id} comment={comment} />
               ))}
             </div>
 
-            {error && (
-              <p className="mb-2 text-label-md text-error">{error}</p>
-            )}
+            {error && <p className="mb-2 text-label-md text-error">{error}</p>}
 
             <form onSubmit={handleSubmit} className="mt-auto space-y-2">
               <div className="relative">
@@ -325,14 +455,16 @@ function Step({
   icon,
   number,
 }: {
-  state: 'done' | 'active' | 'pending'
+  state: 'done' | 'active' | 'pending' | 'rejected'
   label: string
   sublabel?: string
   icon?: string
   number?: number
 }) {
   return (
-    <div className={`flex w-1/4 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}>
+    <div
+      className={`flex w-1/4 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}
+    >
       {state === 'done' && (
         <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-secondary text-on-secondary shadow-sm">
           <MaterialIcon name={icon ?? 'check'} filled className="text-[20px]" />
@@ -344,6 +476,11 @@ function Step({
           <MaterialIcon name={icon ?? 'autorenew'} className="text-[20px]" />
         </div>
       )}
+      {state === 'rejected' && (
+        <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-error text-on-error shadow-sm">
+          <MaterialIcon name={icon ?? 'close'} filled className="text-[20px]" />
+        </div>
+      )}
       {state === 'pending' && (
         <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-surface-variant text-on-surface-variant">
           <span className="text-label-md font-semibold">{number}</span>
@@ -351,8 +488,12 @@ function Step({
       )}
       <span
         className={`text-center text-label-md ${
-          state === 'active' ? 'font-bold text-primary' : 'font-semibold text-on-surface'
-        } ${state === 'pending' ? 'text-on-surface-variant' : ''}`}
+          state === 'active' || state === 'rejected'
+            ? 'font-bold text-primary'
+            : 'font-semibold text-on-surface'
+        } ${state === 'pending' ? 'text-on-surface-variant' : ''} ${
+          state === 'rejected' ? 'text-error' : ''
+        }`}
       >
         {label}
       </span>

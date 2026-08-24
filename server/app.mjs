@@ -10,13 +10,26 @@ import {
   deleteFromR2,
   documentObjectKey,
   fileExtension,
+  getObjectFromR2,
   isAllowedExtension,
   isR2Configured,
   r2Config,
+  sanitizeFileName,
   uploadToR2,
 } from './r2.mjs'
 
 dotenv.config()
+
+function isPasswordValid(password) {
+  const value = String(password || '')
+  return (
+    value.length >= 8 &&
+    /[A-Z]/.test(value) &&
+    /[a-z]/.test(value) &&
+    /[0-9]/.test(value) &&
+    /[!@#$%^&*]/.test(value)
+  )
+}
 
 function sessionCookie(name, value, httpOnly = true) {
   const parts = [
@@ -54,20 +67,136 @@ function adminToken() {
   return process.env.ADMIN_TOKEN || 'portal-partners-dev-admin'
 }
 
+/** Afiliado y Partner Auditor comparten el flujo de perfil / documentación. */
+function canUseAuditorPipeline(role) {
+  return role === 'partner_auditor' || role === 'afiliado'
+}
+
+function helpdeskConfig() {
+  const baseUrl = (process.env.HELPDESK_API_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '')
+  const apiKey = (process.env.HELPDESK_INTEGRATION_API_KEY || process.env.N8N_INTEGRATION_API_KEY || '').trim()
+  return { baseUrl, apiKey }
+}
+
+async function notifyHelpdeskPartnerAuditor({
+  stage,
+  application,
+  partner,
+  profile,
+  documents,
+}) {
+  const { baseUrl, apiKey } = helpdeskConfig()
+  if (!apiKey) {
+    console.warn('[helpdesk] HELPDESK_INTEGRATION_API_KEY no configurada — omitiendo sync Partner Auditor')
+    return null
+  }
+  const partnerPayload = {
+    first_name: partner.first_name,
+    last_name: partner.last_name,
+    email: partner.email,
+    document_id: profile?.document_id || '',
+    phone: profile?.phone || '',
+  }
+  const docsPayload = (documents || []).map((d) => ({
+    category: d.category,
+    file_name: d.file_name,
+    file_size: d.file_size,
+    storage_key: d.storage_key,
+    mime_type: d.mime_type,
+  }))
+  const payload = {
+    client_request_id: `portal-partners-${application.public_code}-fase${stage}`,
+    stage,
+    public_code: application.public_code,
+    portal_partner_id: String(partner.id),
+    portal_application_id: String(application.id),
+    partner: partnerPayload,
+    documents: docsPayload,
+    title: `PARTNER AUDITOR — FASE ${stage} — ${partner.first_name || ''} ${partner.last_name || ''}`.trim(),
+    tags: `portal_partners,partner_auditor,fase_${stage}`,
+  }
+  try {
+    const resp = await fetch(`${baseUrl}/integrations/portal/partner-auditor-applications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      console.warn('[helpdesk] partner-auditor sync failed', resp.status, text.slice(0, 400))
+      return null
+    }
+    return await resp.json().catch(() => ({ ok: true }))
+  } catch (err) {
+    console.warn('[helpdesk] partner-auditor sync error', err?.message || err)
+    return null
+  }
+}
+
+async function notifyHelpdeskPartnerComment({ publicCode, author, text }) {
+  const { baseUrl, apiKey } = helpdeskConfig()
+  if (!apiKey || !publicCode) return null
+  try {
+    const resp = await fetch(
+      `${baseUrl}/integrations/portal/partner-auditor-applications/${encodeURIComponent(publicCode)}/comments`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': apiKey,
+        },
+        body: JSON.stringify({
+          author,
+          text,
+          author_role: 'applicant',
+        }),
+      },
+    )
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      console.warn('[helpdesk] partner comment sync failed', resp.status, body.slice(0, 300))
+    }
+  } catch (err) {
+    console.warn('[helpdesk] partner comment sync error', err?.message || err)
+  }
+  return null
+}
+
 let pool
 
 function getPool() {
   if (!pool) {
     dotenv.config()
+    const host = process.env.PGHOST
+    if (!host) {
+      throw new Error('Falta PGHOST en el archivo .env')
+    }
     pool = new pg.Pool({
-      host: process.env.PGHOST,
+      host,
       port: Number(process.env.PGPORT || 5432),
       database: process.env.PGDATABASE,
       user: process.env.PGUSER,
       password: process.env.PGPASSWORD,
+      connectionTimeoutMillis: 8000,
     })
   }
   return pool
+}
+
+function databaseErrorMessage(error) {
+  const code = error?.code || ''
+  const host = process.env.PGHOST || '?'
+  const port = process.env.PGPORT || '5432'
+  if (code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
+    return `No se pudo conectar a PostgreSQL en ${host}:${port} (${code}). Revisa red/VPN y que el servidor esté encendido.`
+  }
+  if (code === '28P01') {
+    return 'Credenciales de PostgreSQL rechazadas. Revisa PGUSER y PGPASSWORD en .env.'
+  }
+  return 'No se pudo conectar con la base de datos.'
 }
 
 const PASSWORD_RULES = {
@@ -198,23 +327,99 @@ function formatSqlDate(value) {
   return String(value).slice(0, 10)
 }
 
-function isAuditComplete(audit) {
-  const days = Number(audit.days)
-  return Boolean(
-    String(audit.organization || '').trim() &&
-      String(audit.standard || '').trim() &&
-      String(audit.startDate || audit.start_date || '').trim() &&
-      String(audit.endDate || audit.end_date || '').trim() &&
-      Number.isFinite(days) &&
-      days > 0 &&
-      String(audit.auditType || audit.audit_type || '').trim() &&
-      String(audit.role || '').trim() &&
-      String(audit.iafCode || audit.iaf_code || '').trim(),
-  )
+function reviewFrozen(status) {
+  return ['sent', 'in_review', 'validated', 'approved'].includes(String(status || ''))
 }
 
-function reviewFrozen(status) {
-  return status === 'in_review' || status === 'approved'
+const PORTAL_REVIEW_STATUSES = new Set([
+  'pending',
+  'sent',
+  'in_review',
+  'validated',
+  'approved',
+  'rejected',
+  'locked',
+])
+
+const DOC_SLOT_LABELS = {
+  cv_documentado: 'CV documentado y actualizado',
+  diploma_estudio: 'Diploma estudio técnico o universitario',
+  certificados_auditor_lider: 'Certificados de curso de Auditor Líder',
+  relacion_auditorias: 'Relación de auditorías realizadas como Auditor Líder',
+  formato_ic_f_1_2: 'Formato IC.F.1.2',
+  cv: 'CV documentado y actualizado',
+  degree: 'Diploma estudio técnico o universitario',
+  lead_auditor_courses: 'Certificados de curso de Auditor Líder',
+  audits_relation: 'Relación de auditorías realizadas como Auditor Líder',
+  icf12: 'Formato IC.F.1.2',
+}
+
+function labelDocSlot(key) {
+  return DOC_SLOT_LABELS[key] || String(key || '').replace(/_/g, ' ')
+}
+
+function parseLegacyCommentMeta(body) {
+  const text = String(body || '')
+  const docsMatch = text.match(/📎\s*Documentos observados:\s*([^\n]+)/i)
+  const deadlineMatch = text.match(
+    /⏱\s*Fecha límite de corrección(?:\s*\(([^)]+)\))?:\s*(?:vence\s*)?([^\n]+)/i,
+  )
+  const referencedDocs = docsMatch
+    ? docsMatch[1]
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+  let cleanBody = text
+    .replace(/\n*\s*📎\s*Documentos observados:[^\n]*/gi, '')
+    .replace(/\n*\s*⏱\s*Fecha límite de corrección[^\n]*/gi, '')
+    .trim()
+  return {
+    cleanBody,
+    referencedDocs,
+    deadlineDurationLabel: deadlineMatch?.[1]?.trim() || null,
+    deadlineLabel: deadlineMatch?.[2]?.trim() || null,
+  }
+}
+
+function publicComment(row) {
+  const legacy = parseLegacyCommentMeta(row.body)
+  const storedDocs = Array.isArray(row.referenced_docs)
+    ? row.referenced_docs
+    : typeof row.referenced_docs === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(row.referenced_docs)
+          } catch {
+            return []
+          }
+        })()
+      : []
+  const referencedDocs = (storedDocs.length ? storedDocs : legacy.referencedDocs).map(String)
+  const hasStructuredDeadline = Boolean(row.deadline_at)
+  const body =
+    storedDocs.length || hasStructuredDeadline ? String(row.body || '').trim() : legacy.cleanBody
+  return {
+    id: row.id,
+    authorRole: row.author_role,
+    authorName: row.author_name,
+    body,
+    referencedDocs,
+    referencedDocLabels: referencedDocs.map(labelDocSlot),
+    deadlineAt: row.deadline_at || null,
+    deadlineDurationLabel: row.deadline_duration_label || legacy.deadlineDurationLabel,
+    deadlineLabel: hasStructuredDeadline ? null : legacy.deadlineLabel,
+    createdAt: row.created_at,
+  }
+}
+
+async function createPartnerNotification(partnerId, { title, body, link }) {
+  if (!partnerId) return
+  await getPool().query(
+    `INSERT INTO partner_notifications (partner_id, title, body, link)
+     VALUES ($1, $2, $3, $4)`,
+    [partnerId, title, body, link || '/dashboard/estado'],
+  )
 }
 
 function publicUser(row) {
@@ -320,7 +525,7 @@ async function migrate() {
   `)
   await getPool().query(`
     UPDATE partner_profiles
-    SET review1_status = 'in_review',
+    SET review1_status = 'sent',
         review1_submitted_at = COALESCE(review1_submitted_at, submitted_at)
     WHERE submitted_at IS NOT NULL AND review1_status = 'pending'
   `)
@@ -338,6 +543,48 @@ async function migrate() {
       iaf_code TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `)
+
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS applications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      public_code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'in_review',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `)
+
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS application_comments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+      author_role TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      body TEXT NOT NULL,
+      referenced_docs JSONB NOT NULL DEFAULT '[]'::jsonb,
+      deadline_at TIMESTAMPTZ,
+      deadline_duration_label TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `)
+
+  await getPool().query(`
+    ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS referenced_docs JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ;
+    ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_duration_label TEXT;
+  `)
+
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS partner_notifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      link TEXT,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
 }
@@ -443,7 +690,7 @@ export function createApi() {
       next()
     } catch (error) {
       console.error(error)
-      res.status(500).json({ error: 'No se pudo conectar con la base de datos.' })
+      res.status(500).json({ error: databaseErrorMessage(error) })
     }
   })
 
@@ -485,7 +732,7 @@ export function createApi() {
 
     try {
       const passwordHash = await bcrypt.hash(password, 10)
-      const documentsUnlocked = role === 'partner_auditor'
+      const documentsUnlocked = true
       const { rows } = await getPool().query(
         `INSERT INTO partners
           (first_name, last_name, email, password_hash, role, auditor_request_status, documents_unlocked, terms_accepted_at)
@@ -577,8 +824,8 @@ export function createApi() {
   })
 
   app.post('/api/documents/upload', requireAuth, (req, res, next) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'La carga de documentos es exclusiva para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'La carga de documentos no está disponible para este rol.' })
       return
     }
     upload.single('file')(req, res, (error) => {
@@ -710,8 +957,8 @@ export function createApi() {
 
   app.post('/api/documents/submit', requireAuth, async (req, res) => {
     const partner = req.partner
-    if (partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Este envío es exclusivo para Partner Auditor.' })
+    if (!canUseAuditorPipeline(partner.role)) {
+      res.status(403).json({ error: 'Este envío no está disponible para este rol.' })
       return
     }
     if (!partner.documents_unlocked) {
@@ -766,7 +1013,8 @@ export function createApi() {
     )
     const { rows: comments } = appRows[0]
       ? await getPool().query(
-          `SELECT id, author_role, author_name, body, created_at
+          `SELECT id, author_role, author_name, body, referenced_docs, deadline_at,
+                  deadline_duration_label, created_at
            FROM application_comments WHERE application_id = $1
            ORDER BY created_at ASC`,
           [appRows[0].id],
@@ -788,19 +1036,13 @@ export function createApi() {
             createdAt: appRows[0].created_at,
           }
         : null,
-      comments: comments.map((item) => ({
-        id: item.id,
-        authorRole: item.author_role,
-        authorName: item.author_name,
-        body: item.body,
-        createdAt: item.created_at,
-      })),
+      comments: comments.map(publicComment),
     })
   })
 
   app.put('/api/profile', requireAuth, async (req, res) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Este formulario solo está disponible para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Este formulario no está disponible para este rol.' })
       return
     }
     const body = req.body || {}
@@ -871,8 +1113,8 @@ export function createApi() {
   })
 
   app.post('/api/profile/submit', requireAuth, async (req, res) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Este formulario solo está disponible para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Este formulario no está disponible para este rol.' })
       return
     }
     if (!req.partner.documents_unlocked) {
@@ -966,8 +1208,8 @@ export function createApi() {
   }
 
   async function requireEditableReview1(req, res) {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Esta sección es exclusiva para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta sección no está disponible para este rol.' })
       return false
     }
     const reviews = await getReviewStatuses(req.partner.id)
@@ -1089,8 +1331,8 @@ export function createApi() {
   })
 
   app.post('/api/profile/review1/submit', requireAuth, async (req, res) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Este envío es exclusivo para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Este envío no está disponible para este rol.' })
       return
     }
     const reviews = await getReviewStatuses(req.partner.id)
@@ -1114,33 +1356,10 @@ export function createApi() {
       return
     }
 
-    const { rows: audits } = await getPool().query(
-      `SELECT * FROM auditor_audits WHERE partner_id = $1`,
-      [req.partner.id],
-    )
-    const completeAudits = audits.filter((row) =>
-      isAuditComplete({
-        organization: row.organization,
-        standard: row.standard,
-        startDate: row.start_date,
-        endDate: row.end_date,
-        days: row.days,
-        auditType: row.audit_type,
-        role: row.role,
-        iafCode: row.iaf_code,
-      }),
-    )
-    if (!completeAudits.length) {
-      res.status(400).json({
-        error: 'Registra al menos una auditoría con organización, norma, fechas, días, tipo, rol y código IAF.',
-      })
-      return
-    }
-
     await ensurePartnerProfile(req.partner.id)
     await getPool().query(
       `UPDATE partner_profiles
-       SET review1_status = 'in_review',
+       SET review1_status = 'sent',
            review1_submitted_at = now(),
            submitted_at = COALESCE(submitted_at, now()),
            current_step = 4,
@@ -1164,6 +1383,22 @@ export function createApi() {
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
       [req.partner.id],
     )
+    const { rows: docRows } = await getPool().query(
+      `SELECT category, file_name, file_size, storage_key, mime_type
+       FROM documents
+       WHERE partner_id = $1
+         AND category = ANY($2::text[])
+         AND storage_key IS NOT NULL
+       ORDER BY created_at`,
+      [req.partner.id, REVIEW1_DOC_CATEGORIES],
+    )
+    await notifyHelpdeskPartnerAuditor({
+      stage: 1,
+      application,
+      partner: partnerRows[0],
+      profile: profileRows[0],
+      documents: docRows,
+    })
     res.json({
       user: publicUser(partnerRows[0]),
       profile: publicProfile(profileRows[0], partnerRows[0]),
@@ -1172,8 +1407,8 @@ export function createApi() {
   })
 
   app.post('/api/profile/review2/submit', requireAuth, async (req, res) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Este envío es exclusivo para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Este envío no está disponible para este rol.' })
       return
     }
     const reviews = await getReviewStatuses(req.partner.id)
@@ -1200,7 +1435,7 @@ export function createApi() {
 
     await getPool().query(
       `UPDATE partner_profiles
-       SET review2_status = 'in_review',
+       SET review2_status = 'sent',
            review2_submitted_at = now(),
            updated_at = now()
        WHERE partner_id = $1`,
@@ -1217,10 +1452,128 @@ export function createApi() {
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
       [req.partner.id],
     )
+    const { rows: docRows } = await getPool().query(
+      `SELECT category, file_name, file_size, storage_key, mime_type
+       FROM documents
+       WHERE partner_id = $1 AND category = 'icf12' AND storage_key IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [req.partner.id],
+    )
+    await notifyHelpdeskPartnerAuditor({
+      stage: 2,
+      application,
+      partner: partnerRows[0],
+      profile: profileRows[0],
+      documents: docRows,
+    })
     res.json({
       user: publicUser(partnerRows[0]),
       profile: publicProfile(profileRows[0], partnerRows[0]),
       publicCode: application.public_code,
+    })
+  })
+
+  app.get('/api/admin/documents/download', async (req, res) => {
+    if (req.headers['x-admin-token'] !== adminToken()) {
+      res.status(401).json({ error: 'No autorizado.' })
+      return
+    }
+    const key = String(req.query.key || '').trim()
+    const fileName = sanitizeFileName(String(req.query.fileName || 'documento.pdf'))
+    if (!key || !key.startsWith('partners/')) {
+      res.status(400).json({ error: 'storage_key inválido.' })
+      return
+    }
+    if (!isR2Configured()) {
+      res.status(503).json({ error: 'Almacenamiento R2 no configurado.' })
+      return
+    }
+    try {
+      const file = await getObjectFromR2(key)
+      res.setHeader('Content-Type', file.contentType || 'application/octet-stream')
+      if (file.contentLength) {
+        res.setHeader('Content-Length', String(file.contentLength))
+      }
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      )
+      res.send(file.body)
+    } catch (err) {
+      console.error('[admin] document download failed', err)
+      res.status(404).json({ error: 'No se pudo descargar el documento.' })
+    }
+  })
+
+  app.post('/api/admin/applications/by-code/:publicCode/comments', async (req, res) => {
+    if (req.headers['x-admin-token'] !== adminToken()) {
+      res.status(401).json({ error: 'No autorizado.' })
+      return
+    }
+    const publicCode = String(req.params.publicCode || '').trim()
+    const authorName = String(req.body?.authorName || 'Operaciones Intercert').trim()
+    const authorEmail = String(req.body?.authorEmail || '').trim()
+    const body = String(req.body?.body || '').trim()
+    if (!publicCode || !body) {
+      res.status(400).json({ error: 'Código y comentario son obligatorios.' })
+      return
+    }
+    const referencedDocs = Array.isArray(req.body?.referencedDocs)
+      ? req.body.referencedDocs.map((item) => String(item)).filter(Boolean)
+      : []
+    const deadlineAt = req.body?.deadlineAt ? String(req.body.deadlineAt) : null
+    const deadlineDurationLabel = req.body?.deadlineDurationLabel
+      ? String(req.body.deadlineDurationLabel)
+      : null
+    const { rows: appRows } = await getPool().query(
+      `SELECT id, partner_id, public_code
+       FROM applications WHERE public_code = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [publicCode],
+    )
+    if (!appRows[0]) {
+      res.status(404).json({ error: 'Solicitud no encontrada.' })
+      return
+    }
+    const { rows } = await getPool().query(
+      `INSERT INTO application_comments (
+         application_id, author_role, author_name, body,
+         referenced_docs, deadline_at, deadline_duration_label
+       )
+       VALUES ($1, 'coordinator', $2, $3, $4::jsonb, $5, $6)
+       RETURNING id, author_role, author_name, body, referenced_docs, deadline_at,
+                 deadline_duration_label, created_at`,
+      [
+        appRows[0].id,
+        authorName,
+        body,
+        JSON.stringify(referencedDocs),
+        deadlineAt || null,
+        deadlineDurationLabel,
+      ],
+    )
+    const who = authorEmail ? `${authorName} (${authorEmail})` : authorName
+    const notifBits = []
+    if (referencedDocs.length) {
+      notifBits.push(`${referencedDocs.length} documento(s) observados`)
+    }
+    if (deadlineAt || deadlineDurationLabel) {
+      notifBits.push(
+        deadlineDurationLabel
+          ? `plazo de corrección: ${deadlineDurationLabel}`
+          : 'plazo de corrección asignado',
+      )
+    }
+    await createPartnerNotification(appRows[0].partner_id, {
+      title: 'Nuevo mensaje de Operaciones',
+      body: notifBits.length
+        ? `${who} comentó en tu solicitud ${appRows[0].public_code}: ${notifBits.join(' · ')}`
+        : `${who} te envió un comentario sobre tu solicitud ${appRows[0].public_code}.`,
+      link: '/dashboard/estado',
+    })
+    res.status(201).json({
+      comment: publicComment(rows[0]),
     })
   })
 
@@ -1285,8 +1638,8 @@ export function createApi() {
        JOIN partners p ON p.id = pr.partner_id
        WHERE p.role = 'partner_auditor'
          AND (
-           pr.review1_status IN ('in_review', 'approved', 'rejected')
-           OR pr.review2_status IN ('in_review', 'approved', 'rejected')
+           pr.review1_status IN ('sent', 'in_review', 'validated', 'approved', 'rejected')
+           OR pr.review2_status IN ('sent', 'in_review', 'validated', 'approved', 'rejected')
          )
        ORDER BY COALESCE(pr.review2_submitted_at, pr.review1_submitted_at, pr.updated_at) DESC`,
     )
@@ -1299,7 +1652,20 @@ export function createApi() {
       return
     }
     const stage = Number(req.body?.stage) === 2 ? 2 : 1
-    const status = req.body?.status === 'approved' ? 'approved' : 'rejected'
+    const rawStatus = String(req.body?.status || '').trim()
+    const statusAlias = {
+      approved: 'approved',
+      rejected: 'rejected',
+      sent: 'sent',
+      in_review: 'in_review',
+      validated: 'validated',
+      pending: 'pending',
+    }
+    const status = statusAlias[rawStatus]
+    if (!status || !PORTAL_REVIEW_STATUSES.has(status) || status === 'locked') {
+      res.status(400).json({ error: 'Estado de revisión inválido.' })
+      return
+    }
     const partnerId = req.params.partnerId
 
     const { rows: profileRows } = await getPool().query(
@@ -1312,25 +1678,39 @@ export function createApi() {
     }
 
     if (stage === 1) {
-      if (profileRows[0].review1_status !== 'in_review' && profileRows[0].review1_status !== 'rejected') {
-        res.status(400).json({ error: 'Esta revisión 1 no está lista para aprobar o rechazar.' })
+      const current = profileRows[0].review1_status
+      if (current === 'pending' || current === 'locked') {
+        res.status(400).json({ error: 'La revisión 1 aún no fue enviada por el partner.' })
         return
       }
       await getPool().query(
         `UPDATE partner_profiles
          SET review1_status = $1,
-             review2_status = CASE WHEN $1 = 'approved' THEN 'pending' ELSE 'locked' END,
+             review2_status = CASE
+               WHEN $1 = 'approved' THEN
+                 CASE
+                   WHEN review2_status = 'locked' OR review2_status IS NULL THEN 'pending'
+                   ELSE review2_status
+                 END
+               ELSE review2_status
+             END,
              updated_at = now()
          WHERE partner_id = $2`,
         [status, partnerId],
       )
     } else {
       if (profileRows[0].review1_status !== 'approved') {
-        res.status(400).json({ error: 'Primero debe aprobarse la revisión 1.' })
+        res.status(400).json({
+          error: 'Primero debe completarse la respuesta final de la revisión 1.',
+        })
         return
       }
-      if (profileRows[0].review2_status !== 'in_review' && profileRows[0].review2_status !== 'rejected') {
-        res.status(400).json({ error: 'Esta revisión 2 no está lista para aprobar o rechazar.' })
+      const current = profileRows[0].review2_status
+      const review2Submitted = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
+        current,
+      )
+      if (!review2Submitted) {
+        res.status(400).json({ error: 'La revisión 2 aún no fue enviada por el partner.' })
         return
       }
       await getPool().query(
@@ -1346,24 +1726,58 @@ export function createApi() {
       [partnerId],
     )
     if (appRows[0]) {
-      const message =
-        stage === 1
-          ? status === 'approved'
-            ? 'La revisión 1 de documentación fue aprobada. Ya puedes descargar, completar y subir el formato IC.F.1.2 Application and Auditor Registration - Initial.'
-            : 'La revisión 1 de documentación no fue aprobada. Corrige los puntos observados y vuelve a enviarla.'
-          : status === 'approved'
-            ? 'El formato IC.F.1.2 Application and Auditor Registration - Initial fue aprobado. Completaste las dos revisiones.'
-            : 'El formato IC.F.1.2 no fue aprobado. Descárgalo de nuevo, corrígelo y vuelve a subirlo.'
-      await getPool().query(
-        `INSERT INTO application_comments (application_id, author_role, author_name, body)
-         VALUES ($1, 'coordinator', 'Intercert Latam', $2)`,
-        [appRows[0].id, message],
-      )
-      if (stage === 2 && status === 'approved') {
+      const messageByStatus = {
+        sent: stage === 1
+          ? 'Recibimos tu documentación de la revisión 1.'
+          : 'Recibimos el formato IC.F.1.2.',
+        in_review:
+          stage === 1
+            ? 'Tu documentación de la revisión 1 está en revisión por Operaciones.'
+            : 'Tu formato IC.F.1.2 está en revisión por Operaciones.',
+        validated:
+          stage === 1
+            ? 'La documentación de la revisión 1 fue validada.'
+            : 'El formato IC.F.1.2 fue validado.',
+        approved:
+          stage === 1
+            ? 'Respuesta final de la revisión 1: aprobada. Ya puedes continuar con el formato IC.F.1.2.'
+            : 'Respuesta final de la revisión 2: aprobada. Completaste el registro de auditor.',
+        rejected:
+          stage === 1
+            ? 'La revisión 1 no fue aprobada. Corrige los puntos observados y vuelve a enviarla.'
+            : 'La revisión 2 no fue aprobada. Corrige el formato IC.F.1.2 y vuelve a enviarlo.',
+      }
+      const message = messageByStatus[status]
+      if (message) {
         await getPool().query(
-          `UPDATE applications SET status = 'approved' WHERE id = $1`,
-          [appRows[0].id],
+          `INSERT INTO application_comments (application_id, author_role, author_name, body)
+           VALUES ($1, 'coordinator', 'Intercert Latam', $2)`,
+          [appRows[0].id, message],
         )
+      }
+      if (stage === 2 && status === 'approved') {
+        await getPool().query(`UPDATE applications SET status = 'approved' WHERE id = $1`, [
+          appRows[0].id,
+        ])
+      }
+      if (status === 'in_review' || status === 'validated' || status === 'sent') {
+        await createPartnerNotification(partnerId, {
+          title:
+            status === 'in_review'
+              ? 'Solicitud en revisión'
+              : status === 'validated'
+                ? 'Documentación validada'
+                : 'Solicitud actualizada',
+          body: message || 'Hay una actualización en el estado de tu solicitud.',
+          link: '/dashboard/estado',
+        })
+      }
+      if (status === 'approved' || status === 'rejected') {
+        await createPartnerNotification(partnerId, {
+          title: status === 'approved' ? 'Respuesta final: aprobada' : 'Respuesta final: rechazada',
+          body: message || 'Hay una respuesta final sobre tu solicitud.',
+          link: '/dashboard/estado',
+        })
       }
     }
 
@@ -1371,8 +1785,8 @@ export function createApi() {
   })
 
   app.post('/api/status/comments', requireAuth, async (req, res) => {
-    if (req.partner.role !== 'partner_auditor') {
-      res.status(403).json({ error: 'Los comentarios de validación son para Partner Auditor.' })
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Los comentarios de validación no están disponibles para este rol.' })
       return
     }
     const text = String(req.body?.text || '').trim()
@@ -1381,7 +1795,7 @@ export function createApi() {
       return
     }
     const { rows: appRows } = await getPool().query(
-      `SELECT id FROM applications WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      `SELECT id, public_code FROM applications WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [req.partner.id],
     )
     if (!appRows[0]) {
@@ -1392,18 +1806,61 @@ export function createApi() {
     const { rows } = await getPool().query(
       `INSERT INTO application_comments (application_id, author_role, author_name, body)
        VALUES ($1, 'applicant', $2, $3)
-       RETURNING id, author_role, author_name, body, created_at`,
+       RETURNING id, author_role, author_name, body, referenced_docs, deadline_at,
+                 deadline_duration_label, created_at`,
       [appRows[0].id, name, text],
     )
-    res.status(201).json({
-      comment: {
-        id: rows[0].id,
-        authorRole: rows[0].author_role,
-        authorName: rows[0].author_name,
-        body: rows[0].body,
-        createdAt: rows[0].created_at,
-      },
+    await notifyHelpdeskPartnerComment({
+      publicCode: appRows[0].public_code,
+      author: name,
+      text,
     })
+    res.status(201).json({
+      comment: publicComment(rows[0]),
+    })
+  })
+
+  app.get('/api/notifications', requireAuth, async (req, res) => {
+    const { rows } = await getPool().query(
+      `SELECT id, title, body, link, read_at, created_at
+       FROM partner_notifications
+       WHERE partner_id = $1
+       ORDER BY created_at DESC
+       LIMIT 40`,
+      [req.partner.id],
+    )
+    const unreadCount = rows.filter((item) => !item.read_at).length
+    res.json({
+      unreadCount,
+      notifications: rows.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        link: item.link || '/dashboard/estado',
+        read: Boolean(item.read_at),
+        createdAt: item.created_at,
+      })),
+    })
+  })
+
+  app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
+    await getPool().query(
+      `UPDATE partner_notifications
+       SET read_at = COALESCE(read_at, now())
+       WHERE id = $1 AND partner_id = $2`,
+      [req.params.id, req.partner.id],
+    )
+    res.json({ ok: true })
+  })
+
+  app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
+    await getPool().query(
+      `UPDATE partner_notifications
+       SET read_at = COALESCE(read_at, now())
+       WHERE partner_id = $1 AND read_at IS NULL`,
+      [req.partner.id],
+    )
+    res.json({ ok: true })
   })
 
   app.put('/api/account/avatar', requireAuth, async (req, res) => {

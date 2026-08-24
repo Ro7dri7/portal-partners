@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
 let client
 
@@ -74,6 +74,23 @@ export async function uploadToR2({ key, body, contentType, contentLength }) {
     }),
   )
   return { bucket: cfg.bucket, key }
+}
+
+export async function getObjectFromR2(key) {
+  if (!key) throw new Error('storage_key vacío')
+  const cfg = r2Config()
+  const out = await getR2().send(
+    new GetObjectCommand({
+      Bucket: cfg.bucket,
+      Key: key,
+    }),
+  )
+  const bytes = await out.Body?.transformToByteArray()
+  return {
+    body: Buffer.from(bytes || []),
+    contentType: out.ContentType || 'application/octet-stream',
+    contentLength: out.ContentLength || undefined,
+  }
 }
 
 export async function deleteFromR2(key) {

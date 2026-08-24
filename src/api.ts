@@ -117,7 +117,13 @@ export type ProfessionalProfile = {
   review2Status: Review2Status
 }
 
-export type ReviewStatus = 'pending' | 'in_review' | 'approved' | 'rejected'
+export type ReviewStatus =
+  | 'pending'
+  | 'sent'
+  | 'in_review'
+  | 'validated'
+  | 'approved'
+  | 'rejected'
 export type Review2Status = 'locked' | ReviewStatus
 
 export type AuditorAudit = {
@@ -132,35 +138,59 @@ export type AuditorAudit = {
   iafCode: string
 }
 
+export type StatusComment = {
+  id: string
+  authorRole: 'coordinator' | 'applicant'
+  authorName: string
+  body: string
+  createdAt: string
+  referencedDocs?: string[]
+  referencedDocLabels?: string[]
+  deadlineAt?: string | null
+  deadlineDurationLabel?: string | null
+  deadlineLabel?: string | null
+}
+
+export type PartnerNotification = {
+  id: string
+  title: string
+  body: string
+  link: string
+  read: boolean
+  createdAt: string
+}
+
 export function fetchProfile() {
   return request<{
     profile: ProfessionalProfile
     documents: Array<{ id: string; category: string; file_name: string; file_size: number | null }>
     audits: AuditorAudit[]
     application: { id: string; publicCode: string; status: string; createdAt: string } | null
-    comments: Array<{
-      id: string
-      authorRole: 'coordinator' | 'applicant'
-      authorName: string
-      body: string
-      createdAt: string
-    }>
+    comments: StatusComment[]
   }>('/api/profile')
 }
 
 export function postStatusComment(text: string) {
   return request<{
-    comment: {
-      id: string
-      authorRole: 'coordinator' | 'applicant'
-      authorName: string
-      body: string
-      createdAt: string
-    }
+    comment: StatusComment
   }>('/api/status/comments', {
     method: 'POST',
     body: JSON.stringify({ text }),
   })
+}
+
+export function fetchNotifications() {
+  return request<{ unreadCount: number; notifications: PartnerNotification[] }>(
+    '/api/notifications',
+  )
+}
+
+export function markNotificationRead(id: string) {
+  return request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: 'POST' })
+}
+
+export function markAllNotificationsRead() {
+  return request<{ ok: boolean }>('/api/notifications/read-all', { method: 'POST' })
 }
 
 export function saveProfile(payload: Partial<ProfessionalProfile> & { currentStep?: number }) {
