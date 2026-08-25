@@ -1,14 +1,18 @@
-import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useOutletContext } from '../app-router'
 import {
   changePassword,
+  fetchProfile,
+  saveAccountContact,
   sendEmailVerification,
   updateAvatar,
   verifyEmailCode,
 } from '../api'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { PasswordRequirements } from '../components/PasswordRequirements'
+import { SearchSelect } from '../components/SearchSelect'
 import { AVATAR_URL, saveUser, type PartnerUser } from '../constants'
+import { COUNTRY_OPTIONS } from '../data/locations'
 import { getPasswordChecks, isPasswordValid } from '../utils/passwordValidation'
 
 type DashboardContext = {
@@ -72,8 +76,47 @@ export function SettingsPage() {
   const [sendingCode, setSendingCode] = useState(false)
   const [verifying, setVerifying] = useState(false)
 
+  const [documentId, setDocumentId] = useState('')
+  const [phone, setPhone] = useState('')
+  const [country, setCountry] = useState('')
+  const [contactError, setContactError] = useState('')
+  const [contactOk, setContactOk] = useState('')
+  const [savingContact, setSavingContact] = useState(false)
+
   const checks = useMemo(() => getPasswordChecks(newPassword), [newPassword])
   const passwordReady = isPasswordValid(newPassword)
+
+  useEffect(() => {
+    fetchProfile()
+      .then((data) => {
+        setDocumentId(data.profile.documentId || '')
+        setPhone(data.profile.phone || '')
+        setCountry(data.profile.country || '')
+      })
+      .catch(() => {})
+  }, [])
+
+  async function handleContactSubmit(event: FormEvent) {
+    event.preventDefault()
+    setContactError('')
+    setContactOk('')
+    setSavingContact(true)
+    try {
+      const result = await saveAccountContact({
+        documentId: documentId.trim(),
+        phone: phone.trim(),
+        country: country.trim(),
+      })
+      setDocumentId(result.profile.documentId || '')
+      setPhone(result.profile.phone || '')
+      setCountry(result.profile.country || '')
+      setContactOk('Datos de contacto actualizados.')
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : 'No se pudieron guardar los datos.')
+    } finally {
+      setSavingContact(false)
+    }
+  }
 
   async function handleAvatarChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -168,7 +211,7 @@ export function SettingsPage() {
       <header className="mb-5">
         <h2 className="text-headline-md font-bold text-primary">Configuración</h2>
         <p className="mt-1 text-body-md text-on-surface-variant">
-          Actualiza tu foto, verifica tu correo y cambia tu contraseña.
+          Actualiza tu foto, datos de contacto, verifica tu correo y cambia tu contraseña.
         </p>
       </header>
 
@@ -275,6 +318,64 @@ export function SettingsPage() {
         </section>
 
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-5 shadow-level-1 lg:col-span-2">
+          <h3 className="mb-4 text-headline-sm font-semibold text-primary">Datos de contacto</h3>
+          <form className="grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3" onSubmit={handleContactSubmit}>
+            <div>
+              <label className="mb-1 block text-label-md font-semibold text-on-surface" htmlFor="document-id">
+                DNI / Documento
+              </label>
+              <input
+                id="document-id"
+                className={inputClass}
+                placeholder="Ej. 12345678"
+                value={documentId}
+                onChange={(e) => setDocumentId(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-label-md font-semibold text-on-surface" htmlFor="phone">
+                Número de teléfono
+              </label>
+              <input
+                id="phone"
+                type="tel"
+                className={inputClass}
+                placeholder="Ej. +51 999 999 999"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-label-md font-semibold text-on-surface" htmlFor="country">
+                País de origen
+              </label>
+              <SearchSelect
+                id="country"
+                value={country}
+                options={COUNTRY_OPTIONS}
+                placeholder="Selecciona un país"
+                onChange={setCountry}
+              />
+            </div>
+            {contactError && (
+              <p className="text-label-md text-error sm:col-span-3">{contactError}</p>
+            )}
+            {contactOk && (
+              <p className="text-label-md text-success sm:col-span-3">{contactOk}</p>
+            )}
+            <div className="sm:col-span-3">
+              <button
+                type="submit"
+                disabled={savingContact}
+                className="rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50"
+              >
+                {savingContact ? 'Guardando...' : 'Guardar datos'}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-5 shadow-level-1 lg:col-span-2">
           <h3 className="mb-4 text-headline-sm font-semibold text-primary">Cambiar contraseña</h3>
           <form className="grid max-w-2xl grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={handlePasswordSubmit}>
             <div className="sm:col-span-2">
@@ -320,7 +421,7 @@ export function SettingsPage() {
                   <MaterialIcon name={showNew ? 'visibility' : 'visibility_off'} className="text-[20px]" />
                 </button>
               </div>
-              <PasswordRequirements checks={checks} />
+              {newPassword.length > 0 && <PasswordRequirements checks={checks} />}
             </div>
             <div>
               <label className="mb-1 block text-label-md font-semibold text-on-surface" htmlFor="confirm-password">

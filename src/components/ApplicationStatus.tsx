@@ -152,25 +152,24 @@ export default function ApplicationStatus({ applicantName }: ApplicationStatusPr
 
           <div className="relative py-8">
             <div className="absolute left-8 right-8 top-1/2 z-0 h-1 -translate-y-1/2 rounded-full bg-surface-variant" />
-            <div className="absolute left-8 top-1/2 z-0 h-1 w-1/3 -translate-y-1/2 rounded-full bg-secondary transition-all duration-500" />
+            <div className="absolute left-8 top-1/2 z-0 h-1 w-1/2 -translate-y-1/2 rounded-full bg-secondary transition-all duration-500" />
 
             <div className="relative z-10 flex w-full items-center justify-between">
               <Step state="done" label="Enviado" sublabel="12 oct 2023" icon="check" />
               <Step state="active" label="En revisión" sublabel="Fase actual" icon="autorenew" />
-              <Step state="pending" label="Validación" number={3} />
-              <Step state="pending" label="Respuesta final" number={4} />
+              <Step state="pending" label="Validada" number={3} />
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col gap-gutter lg:col-span-4">
-          <div className="flex min-h-[360px] flex-1 flex-col rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-md shadow-level-1">
-            <div className="mb-4 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
+        <div className="flex flex-col gap-gutter self-start lg:col-span-4">
+          <div className="flex w-full flex-col rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-md shadow-level-1">
+            <div className="mb-3 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
               <MaterialIcon name="forum" className="text-secondary" />
               <h3 className="text-headline-sm font-semibold text-primary">Comentarios</h3>
             </div>
 
-            <div ref={listRef} className="mb-4 max-h-[280px] flex-1 space-y-4 overflow-y-auto">
+            <div ref={listRef} className="max-h-[280px] space-y-3 overflow-y-auto">
               {comments.map((comment) => (
                 <div
                   key={comment.id}
@@ -196,7 +195,7 @@ export default function ApplicationStatus({ applicantName }: ApplicationStatusPr
               ))}
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-auto space-y-2">
+            <form onSubmit={handleSubmit} className="mt-3 space-y-2">
               <div className="relative">
                 <textarea
                   rows={2}
@@ -276,7 +275,7 @@ function Step({
   number?: number
 }) {
   return (
-    <div className={`flex w-1/4 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}>
+    <div className={`flex w-1/3 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}>
       {state === 'done' && (
         <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-secondary text-on-secondary shadow-sm">
           <MaterialIcon name={icon ?? 'check'} filled className="text-[20px]" />

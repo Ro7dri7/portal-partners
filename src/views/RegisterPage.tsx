@@ -5,6 +5,10 @@ import { postLoginPath, saveSession, type UserRole } from '../auth'
 import { AuthSplitLayout } from '../components/AuthSplitLayout'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { PasswordRequirements } from '../components/PasswordRequirements'
+import {
+  COMMERCIAL_COORDINATOR_STORAGE_KEY,
+  findCoordinatorByEmail,
+} from '../data/commercialCoordinators'
 import { getPasswordChecks, isPasswordValid } from '../utils/passwordValidation'
 
 function readRole(stateRole: unknown): UserRole | null {
@@ -14,10 +18,18 @@ function readRole(stateRole: unknown): UserRole | null {
   return null
 }
 
+function readCoordinatorEmail(stateEmail: unknown): string {
+  if (typeof stateEmail === 'string' && findCoordinatorByEmail(stateEmail)) return stateEmail
+  const stored = sessionStorage.getItem(COMMERCIAL_COORDINATOR_STORAGE_KEY)
+  return findCoordinatorByEmail(stored)?.email || ''
+}
+
 export function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const role = readRole((location.state as { role?: unknown } | null)?.role)
+  const navState = location.state as { role?: unknown; comercialEmail?: unknown } | null
+  const role = readRole(navState?.role)
+  const comercialEmail = readCoordinatorEmail(navState?.comercialEmail)
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -35,14 +47,14 @@ export function RegisterPage() {
   const passwordsMatch = confirmPassword.length === 0 || password === confirmPassword
 
   useEffect(() => {
-    if (!role) navigate('/registro', { replace: true })
-  }, [role, navigate])
+    if (!role || !comercialEmail) navigate('/registro', { replace: true })
+  }, [role, comercialEmail, navigate])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
 
-    if (!role) {
+    if (!role || !comercialEmail) {
       navigate('/registro', { replace: true })
       return
     }
@@ -72,10 +84,12 @@ export function RegisterPage() {
         password,
         confirmPassword,
         role,
+        comercialEmail,
         terms,
       })
       saveSession(result.user, result.token)
       sessionStorage.removeItem('intercert_selected_role')
+      sessionStorage.removeItem(COMMERCIAL_COORDINATOR_STORAGE_KEY)
       navigate(postLoginPath(result.user), { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la cuenta.')
@@ -87,7 +101,7 @@ export function RegisterPage() {
   const inputClass =
     'w-full pl-10 pr-4 py-2 bg-surface rounded-lg border border-outline-variant text-on-surface text-body-md focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-colors'
 
-  if (!role) return null
+  if (!role || !comercialEmail) return null
 
   return (
     <AuthSplitLayout>
@@ -200,7 +214,7 @@ export function RegisterPage() {
               />
             </button>
           </div>
-          <PasswordRequirements checks={checks} />
+          {password.length > 0 && <PasswordRequirements checks={checks} />}
         </div>
 
         <div className="space-y-1">

@@ -29,6 +29,7 @@ export function registerAccount(payload: {
   password: string
   confirmPassword: string
   role: 'afiliado' | 'partner_auditor'
+  comercialEmail: string
   terms: boolean
 }) {
   return request<AuthResponse>('/api/register', {
@@ -91,6 +92,29 @@ export async function uploadDocument(file: File, category: string) {
 
 export function deleteDocument(id: string) {
   return request<{ ok: boolean }>(`/api/documents/${id}`, { method: 'DELETE' })
+}
+
+export async function fetchDocumentFile(id: string, inline = false) {
+  const token = getToken()
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const res = await fetch(`/api/documents/${id}/file?inline=${inline ? '1' : '0'}`, {
+    headers,
+    credentials: 'same-origin',
+  })
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(data.error || 'No se pudo descargar el documento.')
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('content-disposition') || ''
+  const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i)
+  const fileName = decodeURIComponent(match?.[1] || match?.[2] || 'documento')
+  return {
+    blob,
+    fileName,
+    contentType: res.headers.get('content-type') || blob.type,
+  }
 }
 
 export type ProfessionalProfile = {
@@ -163,7 +187,15 @@ export type PartnerNotification = {
 export function fetchProfile() {
   return request<{
     profile: ProfessionalProfile
-    documents: Array<{ id: string; category: string; file_name: string; file_size: number | null }>
+    documents: Array<{
+      id: string
+      category: string
+      file_name: string
+      file_size: number | null
+      mime_type?: string | null
+      created_at?: string
+      review_status?: 'pending' | 'approved' | 'rejected'
+    }>
     audits: AuditorAudit[]
     application: { id: string; publicCode: string; status: string; createdAt: string } | null
     comments: StatusComment[]
@@ -290,6 +322,18 @@ export function verifyEmailCode(code: string) {
   return request<{ user: PartnerUser }>('/api/account/email/verify', {
     method: 'POST',
     body: JSON.stringify({ code }),
+  })
+}
+
+export function saveAccountContact(payload: {
+  documentId: string
+  phone: string
+  phoneExtension?: string
+  country: string
+}) {
+  return request<{ profile: ProfessionalProfile }>('/api/account/contact', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   })
 }
 

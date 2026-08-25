@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useOutletContext } from '../app-router'
+import { useNavigate, useOutletContext } from '../app-router'
 import {
   deleteDocument,
   fetchProfile,
@@ -82,6 +82,7 @@ function itemStatus(
 
 export function ProfilePage() {
   const { user, setUser } = useOutletContext<DashboardContext>()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [error, setError] = useState('')
@@ -202,10 +203,26 @@ export function ProfilePage() {
     }
   }
 
+  function goBack() {
+    if (window.history.length > 1) {
+      window.history.back()
+      return
+    }
+    navigate('/dashboard')
+  }
+
   if (!isAuditor) {
     return (
       <div className="mx-auto pb-12">
         <header className="mb-6">
+          <button
+            type="button"
+            onClick={goBack}
+            className="mb-3 inline-flex items-center gap-1 text-label-md font-semibold text-secondary hover:underline"
+          >
+            <MaterialIcon name="arrow_back" className="text-[18px]" />
+            Volver
+          </button>
           <p className="mb-1 text-label-sm font-bold uppercase tracking-[0.16em] text-secondary">
             Afiliado
           </p>
@@ -269,6 +286,14 @@ export function ProfilePage() {
   return (
     <div className="mx-auto pb-12">
       <header className="mb-6">
+        <button
+          type="button"
+          onClick={goBack}
+          className="mb-3 inline-flex items-center gap-1 text-label-md font-semibold text-secondary hover:underline"
+        >
+          <MaterialIcon name="arrow_back" className="text-[18px]" />
+          Volver
+        </button>
         <p className="mb-1 text-label-sm font-bold uppercase tracking-[0.16em] text-secondary">
           Partner Auditor
         </p>

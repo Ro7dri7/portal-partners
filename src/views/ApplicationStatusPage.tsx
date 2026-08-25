@@ -264,7 +264,23 @@ export function ApplicationStatusPage() {
             </div>
 
             <div className="space-y-8">
-              {progress.phaseTracks.map((track) => (
+              {progress.phaseTracks.map((track) => {
+                const lastIdx = track.steps.reduce(
+                  (acc, step, index) =>
+                    step.state === 'done' || step.state === 'active' || step.state === 'rejected'
+                      ? index
+                      : acc,
+                  0,
+                )
+                const max = Math.max(track.steps.length - 1, 1)
+                const barWidth = Math.min(100, Math.max(0, (lastIdx / max) * 100))
+                const observed = track.steps.some((step) => step.state === 'rejected')
+                const phaseDocs = track.steps.find((step) => step.docs?.length)?.docs || []
+                const showDocs =
+                  track.unlocked &&
+                  phaseDocs.length > 0 &&
+                  track.steps.some((step) => step.state !== 'pending')
+                return (
                 <div
                   key={track.key}
                   className={track.unlocked ? '' : 'opacity-55'}
@@ -274,61 +290,54 @@ export function ApplicationStatusPage() {
                     <p className="text-body-md text-on-surface-variant">{track.subtitle}</p>
                     {!track.unlocked && (
                       <p className="mt-1 text-label-md font-semibold text-on-surface-variant">
-                        Se habilita al completar la respuesta final de la fase 1.
+                        Se habilita al completar la fase 1.
                       </p>
                     )}
                   </div>
-                  <div className="relative py-6">
-                    <div className="absolute left-6 right-6 top-1/2 z-0 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-surface-variant">
-                      <div
-                        className="h-full rounded-full bg-secondary transition-all duration-500"
-                        style={{
-                          width: `${(() => {
-                            const lastIdx = track.steps.reduce(
-                              (acc, step, index) =>
-                                step.state === 'done' ||
-                                step.state === 'active' ||
-                                step.state === 'rejected'
-                                  ? index
-                                  : acc,
-                              0,
-                            )
-                            const max = Math.max(track.steps.length - 1, 1)
-                            return Math.min(100, Math.max(0, (lastIdx / max) * 100))
-                          })()}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="relative z-10 flex w-full items-start justify-between">
-                      {track.steps.map((step, index) => (
-                        <Step
-                          key={step.key}
-                          state={
-                            step.state === 'rejected'
-                              ? 'rejected'
-                              : step.state === 'done'
-                                ? 'done'
-                                : step.state === 'active'
-                                  ? 'active'
-                                  : 'pending'
-                          }
-                          label={step.label}
-                          icon={
-                            step.state === 'done'
-                              ? 'check'
-                              : step.state === 'rejected'
-                                ? 'close'
-                                : step.state === 'active'
-                                  ? 'autorenew'
-                                  : undefined
-                          }
-                          number={index + 1}
+                  <div className="relative">
+                    <div className="relative py-2">
+                      <div className="absolute left-6 right-6 top-7 z-0 h-1 overflow-hidden rounded-full bg-surface-variant">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            observed ? 'bg-error' : 'bg-secondary'
+                          }`}
+                          style={{ width: `${barWidth}%` }}
                         />
-                      ))}
+                      </div>
+                      <div className="relative z-10 flex w-full items-start justify-between">
+                        {track.steps.map((step, index) => (
+                          <Step
+                            key={step.key}
+                            state={
+                              step.state === 'rejected'
+                                ? 'rejected'
+                                : step.state === 'done'
+                                  ? 'done'
+                                  : step.state === 'active'
+                                    ? 'active'
+                                    : 'pending'
+                            }
+                            label={step.label}
+                            icon={
+                              step.state === 'done'
+                                ? 'check'
+                                : step.state === 'rejected'
+                                  ? 'close'
+                                  : step.state === 'active'
+                                    ? 'autorenew'
+                                    : undefined
+                            }
+                            number={index + 1}
+                            success={step.key === 'validated' && step.state === 'done'}
+                          />
+                        ))}
+                      </div>
                     </div>
+                    {showDocs && <PhaseDocOutcomes docs={phaseDocs} observed={observed} />}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
 
             {!progress.review1Done && (
@@ -357,12 +366,12 @@ export function ApplicationStatusPage() {
                 done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review1Status)}
                 label="Revisión 1 enviada"
               />
-              <ChecklistItem done={progress.review1Done} label="Respuesta final fase 1" />
+              <ChecklistItem done={progress.review1Done} label="Fase 1 aprobada" />
               <ChecklistItem
                 done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review2Status)}
                 label="Formato IC.F.1.2 enviado"
               />
-              <ChecklistItem done={progress.review2Done} label="Respuesta final fase 2" />
+              <ChecklistItem done={progress.review2Done} label="Fase 2 aprobada" />
             </ul>
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-label-md">
@@ -379,14 +388,14 @@ export function ApplicationStatusPage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-gutter lg:col-span-4">
-          <div className="flex min-h-[360px] flex-1 flex-col rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-md shadow-level-1">
-            <div className="mb-4 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
+        <div className="flex flex-col gap-gutter self-start lg:col-span-4">
+          <div className="flex w-full flex-col rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-md shadow-level-1">
+            <div className="mb-3 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
               <MaterialIcon name="forum" className="text-secondary" />
               <h3 className="text-headline-sm font-semibold text-primary">Actividad</h3>
             </div>
 
-            <div ref={listRef} className="mb-4 max-h-[360px] flex-1 space-y-4 overflow-y-auto">
+            <div ref={listRef} className="max-h-[280px] space-y-3 overflow-y-auto">
               {progress.activity.map((item) => (
                 <div
                   key={item}
@@ -401,9 +410,9 @@ export function ApplicationStatusPage() {
               ))}
             </div>
 
-            {error && <p className="mb-2 text-label-md text-error">{error}</p>}
+            {error && <p className="mt-2 text-label-md text-error">{error}</p>}
 
-            <form onSubmit={handleSubmit} className="mt-auto space-y-2">
+            <form onSubmit={handleSubmit} className="mt-3 space-y-2">
               <div className="relative">
                 <textarea
                   rows={2}
@@ -448,25 +457,93 @@ function ChecklistItem({ done, label }: { done: boolean; label: string }) {
   )
 }
 
+function PhaseDocOutcomes({
+  docs,
+  observed,
+}: {
+  docs: Array<{ category: string; label: string; status: 'approved' | 'rejected' | 'pending' }>
+  observed: boolean
+}) {
+  const approved = docs.filter((doc) => doc.status === 'approved').length
+  const rejected = docs.filter((doc) => doc.status === 'rejected').length
+  const pending = docs.filter((doc) => doc.status === 'pending').length
+  return (
+    <div
+      className={`mt-4 rounded-lg border p-3 ${
+        observed
+          ? 'border-error/30 bg-error-container/20'
+          : 'border-outline-variant/30 bg-surface-container-low/60'
+      }`}
+    >
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">
+        Documentos de esta fase
+        <span className="ml-2 font-semibold normal-case tracking-normal">
+          {approved} aprobados · {rejected} observados · {pending} pendientes
+        </span>
+      </p>
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {docs.map((doc) => (
+          <li key={doc.category} className="flex items-start gap-2 text-sm">
+            <MaterialIcon
+              name={
+                doc.status === 'approved'
+                  ? 'check_circle'
+                  : doc.status === 'rejected'
+                    ? 'cancel'
+                    : 'schedule'
+              }
+              filled={doc.status !== 'pending'}
+              className={`mt-0.5 text-[18px] ${
+                doc.status === 'approved'
+                  ? 'text-success'
+                  : doc.status === 'rejected'
+                    ? 'text-error'
+                    : 'text-on-surface-variant'
+              }`}
+            />
+            <span
+              className={
+                doc.status === 'rejected'
+                  ? 'font-semibold text-error'
+                  : doc.status === 'approved'
+                    ? 'text-on-surface'
+                    : 'text-on-surface-variant'
+              }
+            >
+              {doc.label}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function Step({
   state,
   label,
   sublabel,
   icon,
   number,
+  success,
 }: {
   state: 'done' | 'active' | 'pending' | 'rejected'
   label: string
   sublabel?: string
   icon?: string
   number?: number
+  success?: boolean
 }) {
   return (
     <div
-      className={`flex w-1/4 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}
+      className={`flex w-1/3 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}
     >
       {state === 'done' && (
-        <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest bg-secondary text-on-secondary shadow-sm">
+        <div
+          className={`flex h-10 w-10 items-center justify-center rounded-full border-2 border-surface-container-lowest text-white shadow-sm ${
+            success ? 'bg-success' : 'bg-secondary'
+          }`}
+        >
           <MaterialIcon name={icon ?? 'check'} filled className="text-[20px]" />
         </div>
       )}

@@ -6,12 +6,20 @@ export function isPartnerAuditor(role: string) {
 
 const REVIEW1_DOCS = ['cv', 'degree', 'lead_auditor_courses', 'audits_relation']
 
-export type PipelineStepKey = 'sent' | 'in_review' | 'validated' | 'final'
+export type PipelineStepKey = 'sent' | 'in_review' | 'validated'
+
+export type DocReviewOutcome = {
+  category: string
+  label: string
+  fileName?: string
+  status: 'approved' | 'rejected' | 'pending'
+}
 
 export type PipelineStep = {
   key: PipelineStepKey
   label: string
   state: 'done' | 'active' | 'pending' | 'rejected'
+  docs?: DocReviewOutcome[]
 }
 
 export type AuditorPhaseTrack = {
@@ -23,56 +31,128 @@ export type AuditorPhaseTrack = {
   steps: PipelineStep[]
 }
 
+export type JourneyStepState = 'done' | 'active' | 'pending' | 'locked' | 'rejected'
+
+export type JourneyStep = {
+  key: 'account' | 'profile' | 'documents' | 'review1' | 'icf12' | 'approved'
+  label: string
+  hint: string
+  state: JourneyStepState
+  fillPercent?: number
+  href?: string
+  shine?: boolean
+}
+
+export const DEFAULT_JOURNEY: JourneyStep[] = [
+  { key: 'account', label: 'Cuenta', hint: 'Registro completado', state: 'done' },
+  { key: 'profile', label: 'Perfil', hint: 'Datos personales', state: 'active' },
+  {
+    key: 'documents',
+    label: 'Documentos',
+    hint: 'CV y evidencias',
+    state: 'pending',
+    fillPercent: 0,
+    href: '/dashboard/perfil',
+    shine: true,
+  },
+  { key: 'review1', label: 'Fase 1', hint: 'Verificación', state: 'pending' },
+  { key: 'icf12', label: 'IC.F.1.2', hint: 'Formato de registro', state: 'locked' },
+  { key: 'approved', label: 'Aprobado', hint: 'Partner habilitado', state: 'pending' },
+]
+
+const REVIEW1_DOC_LABELS: Record<string, string> = {
+  cv: 'CV documentado y actualizado',
+  degree: 'Diploma de estudio técnico o universitario',
+  lead_auditor_courses: 'Certificados de Auditor Líder',
+  audits_relation: 'Relación de auditorías',
+  icf12: 'Formato IC.F.1.2',
+}
+
 function review1DocsReady(documents: Array<{ category: string }>) {
   return REVIEW1_DOCS.every((category) => documents.some((doc) => doc.category === category))
 }
 
+function docOutcomeStatus(raw: string | undefined) {
+  if (raw === 'approved' || raw === 'aprobado') return 'approved' as const
+  if (raw === 'rejected' || raw === 'rechazado' || raw === 'observed') return 'rejected' as const
+  return 'pending' as const
+}
+
+function phaseDocOutcomes(
+  categories: string[],
+  documents: Array<{ category: string; file_name?: string; review_status?: string; reviewStatus?: string; status?: string }>,
+): DocReviewOutcome[] {
+  return categories.map((category) => {
+    const match = documents.find((doc) => doc.category === category)
+    const raw = match?.review_status || match?.reviewStatus || ''
+    return {
+      category,
+      label: REVIEW1_DOC_LABELS[category] || category,
+      fileName: match?.file_name,
+      status: docOutcomeStatus(raw),
+    }
+  })
+}
+
 /**
- * 4-step chain per phase:
- * Enviado → En revisión → Validada → Respuesta final
+ * 3-step chain per phase:
+ * Enviado → En revisión → Validada
  *
  * - Enviado: auto al enviar desde el portal
- * - En revisión: cuando Operaciones pone en_revision
- * - Validada: cuando Operaciones pone validado
- * - Respuesta final: cuando Operaciones pone aprobado (o rechazado)
+ * - En revisión: cuando Operaciones toma la solicitud
+ * - Validada: check verde si Operaciones aprueba; X roja si marca Observado
  */
-function buildPipeline(status: string, unlocked: boolean): PipelineStep[] {
+function buildPipeline(status: string, unlocked: boolean, docs: DocReviewOutcome[] = []): PipelineStep[] {
   const defs: Array<{ key: PipelineStepKey; label: string }> = [
     { key: 'sent', label: 'Enviado' },
     { key: 'in_review', label: 'En revisión' },
     { key: 'validated', label: 'Validada' },
-    { key: 'final', label: 'Respuesta final' },
   ]
 
   if (!unlocked || status === 'pending' || status === 'locked') {
-    return defs.map((d) => ({ ...d, state: 'pending' as const }))
+    return defs.map((d) => ({
+      ...d,
+      state: 'pending' as const,
+      docs: d.key === 'validated' ? docs : undefined,
+    }))
   }
 
-  // furthest reached index
   let furthest = 0
   if (status === 'sent') furthest = 0
   else if (status === 'in_review') furthest = 1
   else if (status === 'validated') furthest = 2
-  else if (status === 'approved' || status === 'rejected') furthest = 3
+  else if (status === 'approved' || status === 'rejected') furthest = 2
   else furthest = 0
 
-  const rejected = status === 'rejected'
+  const observed = status === 'rejected'
   const fullyApproved = status === 'approved'
 
   return defs.map((def, index) => {
-    if (index < furthest) return { ...def, state: 'done' as const }
-    if (index > furthest) return { ...def, state: 'pending' as const }
-    // index === furthest
-    if (def.key === 'sent') return { ...def, state: 'done' as const }
-    if (fullyApproved) return { ...def, state: 'done' as const }
-    if (rejected && def.key === 'final') return { ...def, state: 'rejected' as const }
-    return { ...def, state: 'active' as const }
+    const reached = index <= furthest
+    const withDocs = reached ? docs : undefined
+    if (index < furthest) return { ...def, state: 'done' as const, docs: withDocs }
+    if (index > furthest) return { ...def, state: 'pending' as const, docs: withDocs }
+    if (def.key === 'sent') return { ...def, state: 'done' as const, docs: withDocs }
+    if (def.key === 'validated' && observed) {
+      return { ...def, state: 'rejected' as const, docs: withDocs }
+    }
+    if (def.key === 'validated' && fullyApproved) {
+      return { ...def, state: 'done' as const, docs: withDocs }
+    }
+    if (fullyApproved) return { ...def, state: 'done' as const, docs: withDocs }
+    return { ...def, state: 'active' as const, docs: withDocs }
   })
 }
 
 export function getAuditorProgress(
   profile: ProfessionalProfile,
-  documents: Array<{ category: string }>,
+  documents: Array<{
+    category: string
+    file_name?: string
+    review_status?: string
+    reviewStatus?: string
+    status?: string
+  }>,
 ) {
   let review1Status = profile.review1Status || (profile.submitted ? 'sent' : 'pending')
   // Legacy submits stored in_review immediately → treat as al menos enviado;
@@ -85,6 +165,9 @@ export function getAuditorProgress(
   const review2Done = review2Status === 'approved'
   const review2Unlocked = review1Done
 
+  const review1Docs = phaseDocOutcomes(REVIEW1_DOCS, documents)
+  const review2Docs = phaseDocOutcomes(['icf12'], documents)
+
   const phaseTracks: AuditorPhaseTrack[] = [
     {
       key: 'review1',
@@ -92,7 +175,7 @@ export function getAuditorProgress(
       subtitle: 'CV, diploma, certificados y relación de auditorías',
       unlocked: true,
       complete: review1Done,
-      steps: buildPipeline(review1Status, true),
+      steps: buildPipeline(review1Status, true, review1Docs),
     },
     {
       key: 'review2',
@@ -100,7 +183,7 @@ export function getAuditorProgress(
       subtitle: 'Application and Auditor Registration - Initial',
       unlocked: review2Unlocked,
       complete: review2Done,
-      steps: buildPipeline(review2Status, review2Unlocked),
+      steps: buildPipeline(review2Status, review2Unlocked, review2Docs),
     },
   ]
 
@@ -159,7 +242,7 @@ export function getAuditorProgress(
     badge = 'Observado'
   } else if (review2Status === 'validated') {
     headline = 'Fase 2 validada'
-    description = 'Operaciones validó tu formato. Pronto recibirás la respuesta final.'
+    description = 'Operaciones validó tu formato. Pendiente de aprobación.'
     badge = 'Validada'
   } else if (review2Status === 'in_review') {
     headline = 'Fase 2 en revisión'
@@ -180,7 +263,7 @@ export function getAuditorProgress(
     badge = 'Observado'
   } else if (review1Status === 'validated') {
     headline = 'Documentación validada'
-    description = 'Operaciones validó tus documentos. Pronto recibirás la respuesta final de la fase 1.'
+    description = 'Operaciones validó tus documentos. Pendiente de aprobación de la fase 1.'
     badge = 'Validada'
   } else if (review1Status === 'in_review') {
     headline = 'Documentación en revisión'
@@ -192,19 +275,93 @@ export function getAuditorProgress(
     badge = 'Enviado'
   }
 
+  const profileStarted = Boolean(profile.documentId || profile.phone || profile.country)
+  const review1Started = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
+    review1Status,
+  )
+  const review2Started = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
+    review2Status,
+  )
+
+  const documentsFill = review2Done
+    ? 100
+    : review2Started || icf12Ready
+      ? 60
+      : review1Done
+        ? 40
+        : review1Started
+          ? 20
+          : 0
+
+  const journey: JourneyStep[] = [
+    {
+      key: 'account',
+      label: 'Cuenta',
+      hint: 'Registro completado',
+      state: 'done',
+    },
+    {
+      key: 'profile',
+      label: 'Perfil',
+      hint: 'Datos personales',
+      state: profileStarted ? 'done' : 'pending',
+    },
+    {
+      key: 'documents',
+      label: 'Documentos',
+      hint: documentsFill === 0 ? 'Sube tu documentación' : 'Avance de documentación',
+      state: documentsFill >= 100 ? 'done' : 'pending',
+      fillPercent: documentsFill,
+      href: documentsFill === 0 ? '/dashboard/perfil' : '/dashboard/estado',
+      shine: true,
+    },
+    {
+      key: 'review1',
+      label: 'Fase 1',
+      hint: 'Verificación',
+      state: review1Done ? 'done' : review1Status === 'rejected' ? 'rejected' : 'pending',
+    },
+    {
+      key: 'icf12',
+      label: 'IC.F.1.2',
+      hint: 'Formato de registro',
+      state: !review1Done ? 'locked' : review2Done ? 'done' : 'pending',
+    },
+    {
+      key: 'approved',
+      label: 'Aprobado',
+      hint: 'Partner habilitado',
+      state: review2Done ? 'done' : review2Status === 'rejected' ? 'rejected' : 'pending',
+    },
+  ]
+
+  const currentKey =
+    !profileStarted && documentsFill === 0
+      ? 'profile'
+      : documentsFill < 100
+        ? 'documents'
+        : journey.find((step) => step.state === 'pending')?.key || null
+
+  if (currentKey) {
+    const currentIndex = journey.findIndex((step) => step.key === currentKey)
+    if (currentIndex >= 0) {
+      journey[currentIndex] = { ...journey[currentIndex], state: 'active' }
+    }
+  }
+
   const activity: string[] = []
   if (docsReady) activity.push('Documentos de la revisión 1 cargados.')
   if (submitted) activity.push('Revisión 1 enviada.')
   if (review1Status === 'in_review') activity.push('Revisión 1 en revisión por Operaciones.')
   if (review1Status === 'validated') activity.push('Revisión 1 validada.')
-  if (review1Done) activity.push('Respuesta final de la revisión 1: aprobada. Fase 2 habilitada.')
+  if (review1Done) activity.push('Fase 1 aprobada. Fase 2 habilitada.')
   if (icf12Ready) activity.push('Formato IC.F.1.2 cargado.')
   if (['sent', 'in_review', 'validated', 'approved'].includes(review2Status)) {
     activity.push('Revisión 2 enviada.')
   }
   if (review2Status === 'in_review') activity.push('Revisión 2 en revisión por Operaciones.')
   if (review2Status === 'validated') activity.push('Revisión 2 validada.')
-  if (review2Done) activity.push('Respuesta final de la revisión 2: aprobada. Registro completado.')
+  if (review2Done) activity.push('Fase 2 aprobada. Registro completado.')
   if (activity.length === 0) {
     activity.push('Aún no hay avance. Completa la documentación de Partner Auditor.')
   }
@@ -223,6 +380,7 @@ export function getAuditorProgress(
     review2Status,
     review1Docs: docsReady,
     icf12Ready,
+    journey,
     review1Done,
     review2Done,
     datos: docsReady,

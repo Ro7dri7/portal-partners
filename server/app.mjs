@@ -78,6 +78,17 @@ function helpdeskConfig() {
   return { baseUrl, apiKey }
 }
 
+const COMMERCIAL_COORDINATORS = [
+  { name: 'Cinthia Adriazola', email: 'cadriazola@intercert.com.pe' },
+  { name: 'Liliana Restrepo', email: 'coordinador.comercial@intercert.co' },
+  { name: 'Victor Fernandez', email: 'coordinador.comercial@intercert.mx' },
+]
+
+function resolveCoordinator(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  return COMMERCIAL_COORDINATORS.find((item) => item.email === normalized) || null
+}
+
 async function notifyHelpdeskPartnerAuditor({
   stage,
   application,
@@ -96,6 +107,8 @@ async function notifyHelpdeskPartnerAuditor({
     email: partner.email,
     document_id: profile?.document_id || '',
     phone: profile?.phone || '',
+    comercial_a_cargo: partner.comercial_name || partner.comercial_email || '',
+    comercial_email: partner.comercial_email || '',
   }
   const docsPayload = (documents || []).map((d) => ({
     category: d.category,
@@ -449,6 +462,8 @@ async function migrate() {
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS email_verify_code_hash TEXT;
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS email_verify_expires_at TIMESTAMPTZ;
+    ALTER TABLE partners ADD COLUMN IF NOT EXISTS comercial_email TEXT;
+    ALTER TABLE partners ADD COLUMN IF NOT EXISTS comercial_name TEXT;
   `)
 
   await getPool().query(`
@@ -490,6 +505,7 @@ async function migrate() {
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_key TEXT;
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_bucket TEXT;
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
   `)
 
   await getPool().query(`
@@ -702,9 +718,14 @@ export function createApi() {
     const confirmPassword = String(req.body?.confirmPassword || '')
     const role = req.body?.role === 'partner_auditor' ? 'partner_auditor' : 'afiliado'
     const terms = Boolean(req.body?.terms)
+    const coordinator = resolveCoordinator(req.body?.comercialEmail)
 
     if (!firstName || !lastName || !email) {
       res.status(400).json({ error: 'Completa todos los campos requeridos.' })
+      return
+    }
+    if (!coordinator) {
+      res.status(400).json({ error: 'Selecciona el coordinador comercial que te refirió.' })
       return
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -734,11 +755,11 @@ export function createApi() {
       const passwordHash = await bcrypt.hash(password, 10)
       const documentsUnlocked = true
       const { rows } = await getPool().query(
-        `INSERT INTO partners
-          (first_name, last_name, email, password_hash, role, auditor_request_status, documents_unlocked, terms_accepted_at)
-         VALUES ($1, $2, $3, $4, $5, 'none', $6, now())
-         RETURNING *`,
-        [firstName, lastName, email, passwordHash, role, documentsUnlocked],
+      `INSERT INTO partners
+        (first_name, last_name, email, password_hash, role, auditor_request_status, documents_unlocked, terms_accepted_at, comercial_email, comercial_name)
+       VALUES ($1, $2, $3, $4, $5, 'none', $6, now(), $7, $8)
+       RETURNING *`,
+      [firstName, lastName, email, passwordHash, role, documentsUnlocked, coordinator.email, coordinator.name],
       )
 
       const user = publicUser(rows[0])
@@ -903,7 +924,7 @@ export function createApi() {
         `INSERT INTO documents (
            partner_id, category, file_name, mime_type, file_size, status, storage_key, storage_bucket
          ) VALUES ($1, $2, $3, $4, $5, 'uploaded', $6, $7)
-         RETURNING id, category, file_name, file_size, status`,
+         RETURNING id, category, file_name, file_size, status, review_status`,
         [
           req.partner.id,
           category,
@@ -955,6 +976,39 @@ export function createApi() {
     res.json({ ok: true })
   })
 
+  app.get('/api/documents/:id/file', requireAuth, async (req, res) => {
+    const { rows } = await getPool().query(
+      `SELECT id, file_name, mime_type, storage_key
+       FROM documents WHERE id = $1 AND partner_id = $2`,
+      [req.params.id, req.partner.id],
+    )
+    if (!rows[0]?.storage_key) {
+      res.status(404).json({ error: 'Documento no encontrado.' })
+      return
+    }
+    if (!isR2Configured()) {
+      res.status(503).json({ error: 'Almacenamiento R2 no configurado.' })
+      return
+    }
+    try {
+      const file = await getObjectFromR2(rows[0].storage_key)
+      const fileName = sanitizeFileName(rows[0].file_name || 'documento')
+      const inline = String(req.query.inline || '') === '1'
+      res.setHeader('Content-Type', file.contentType || rows[0].mime_type || 'application/octet-stream')
+      if (file.contentLength) {
+        res.setHeader('Content-Length', String(file.contentLength))
+      }
+      res.setHeader(
+        'Content-Disposition',
+        `${inline ? 'inline' : 'attachment'}; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      )
+      res.send(file.body)
+    } catch (err) {
+      console.error('[documents] download failed', err)
+      res.status(404).json({ error: 'No se pudo descargar el documento.' })
+    }
+  })
+
   app.post('/api/documents/submit', requireAuth, async (req, res) => {
     const partner = req.partner
     if (!canUseAuditorPipeline(partner.role)) {
@@ -1001,8 +1055,8 @@ export function createApi() {
       [req.partner.id],
     )
     const { rows: docs } = await getPool().query(
-      `SELECT id, category, file_name, file_size, status
-       FROM documents WHERE partner_id = $1 ORDER BY created_at`,
+      `SELECT id, category, file_name, file_size, status, review_status, mime_type, created_at
+       FROM documents WHERE partner_id = $1 ORDER BY created_at DESC`,
       [req.partner.id],
     )
     const { rows: appRows } = await getPool().query(
@@ -1356,6 +1410,12 @@ export function createApi() {
       return
     }
 
+    await getPool().query(
+      `UPDATE documents
+       SET review_status = 'pending'
+       WHERE partner_id = $1 AND category = ANY($2::text[])`,
+      [req.partner.id, REVIEW1_DOC_CATEGORIES],
+    )
     await ensurePartnerProfile(req.partner.id)
     await getPool().query(
       `UPDATE partner_profiles
@@ -1433,6 +1493,12 @@ export function createApi() {
       return
     }
 
+    await getPool().query(
+      `UPDATE documents
+       SET review_status = 'pending'
+       WHERE partner_id = $1 AND category = 'icf12'`,
+      [req.partner.id],
+    )
     await getPool().query(
       `UPDATE partner_profiles
        SET review2_status = 'sent',
@@ -1667,6 +1733,16 @@ export function createApi() {
       return
     }
     const partnerId = req.params.partnerId
+    const docsPayload = Array.isArray(req.body?.documents) ? req.body.documents : []
+    const reviewAlias = {
+      approved: 'approved',
+      rejected: 'rejected',
+      pending: 'pending',
+      aprobado: 'approved',
+      rechazado: 'rejected',
+      observado: 'rejected',
+      pendiente: 'pending',
+    }
 
     const { rows: profileRows } = await getPool().query(
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
@@ -1701,7 +1777,7 @@ export function createApi() {
     } else {
       if (profileRows[0].review1_status !== 'approved') {
         res.status(400).json({
-          error: 'Primero debe completarse la respuesta final de la revisión 1.',
+          error: 'Primero debe aprobarse la revisión 1.',
         })
         return
       }
@@ -1721,11 +1797,35 @@ export function createApi() {
       )
     }
 
+    const previousStatus = stage === 1 ? profileRows[0].review1_status : profileRows[0].review2_status
+    const statusChanged = previousStatus !== status
+
+    const stageCategories = stage === 2 ? ['icf12'] : REVIEW1_DOC_CATEGORIES
+    for (const item of docsPayload) {
+      const category = String(item?.category || '').trim()
+      const mappedReview = reviewAlias[String(item?.reviewStatus || item?.review_status || '').trim().toLowerCase()]
+      if (!category || !mappedReview || !stageCategories.includes(category)) continue
+      await getPool().query(
+        `UPDATE documents
+         SET review_status = $1
+         WHERE partner_id = $2 AND category = $3`,
+        [mappedReview, partnerId, category],
+      )
+    }
+    if (status === 'approved') {
+      await getPool().query(
+        `UPDATE documents
+         SET review_status = 'approved'
+         WHERE partner_id = $1 AND category = ANY($2::text[])`,
+        [partnerId, stageCategories],
+      )
+    }
+
     const { rows: appRows } = await getPool().query(
       `SELECT id FROM applications WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [partnerId],
     )
-    if (appRows[0]) {
+    if (statusChanged && appRows[0]) {
       const messageByStatus = {
         sent: stage === 1
           ? 'Recibimos tu documentación de la revisión 1.'
@@ -1740,12 +1840,12 @@ export function createApi() {
             : 'El formato IC.F.1.2 fue validado.',
         approved:
           stage === 1
-            ? 'Respuesta final de la revisión 1: aprobada. Ya puedes continuar con el formato IC.F.1.2.'
-            : 'Respuesta final de la revisión 2: aprobada. Completaste el registro de auditor.',
+            ? 'La fase 1 fue aprobada. Ya puedes continuar con el formato IC.F.1.2.'
+            : 'La fase 2 fue aprobada. Completaste el registro de auditor.',
         rejected:
           stage === 1
-            ? 'La revisión 1 no fue aprobada. Corrige los puntos observados y vuelve a enviarla.'
-            : 'La revisión 2 no fue aprobada. Corrige el formato IC.F.1.2 y vuelve a enviarlo.',
+            ? 'La revisión 1 fue observada. Corrige los documentos marcados y vuelve a enviarla.'
+            : 'La revisión 2 fue observada. Corrige el formato IC.F.1.2 y vuelve a enviarlo.',
       }
       const message = messageByStatus[status]
       if (message) {
@@ -1774,8 +1874,8 @@ export function createApi() {
       }
       if (status === 'approved' || status === 'rejected') {
         await createPartnerNotification(partnerId, {
-          title: status === 'approved' ? 'Respuesta final: aprobada' : 'Respuesta final: rechazada',
-          body: message || 'Hay una respuesta final sobre tu solicitud.',
+          title: status === 'approved' ? 'Fase aprobada' : 'Documentos observados',
+          body: message || 'Hay una actualización sobre tu solicitud.',
           link: '/dashboard/estado',
         })
       }
@@ -1874,6 +1974,30 @@ export function createApi() {
       [image, req.partner.id],
     )
     res.json({ user: publicUser(rows[0]) })
+  })
+
+  app.put('/api/account/contact', requireAuth, async (req, res) => {
+    const documentId = String(req.body?.documentId || '').trim()
+    const phone = String(req.body?.phone || '').trim()
+    const phoneExtension = String(req.body?.phoneExtension || '').trim()
+    const country = String(req.body?.country || '').trim()
+    const { rows } = await getPool().query(
+      `INSERT INTO partner_profiles (partner_id, document_id, phone, phone_extension, country, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (partner_id) DO UPDATE SET
+         document_id = EXCLUDED.document_id,
+         phone = EXCLUDED.phone,
+         phone_extension = EXCLUDED.phone_extension,
+         country = EXCLUDED.country,
+         country_city = CASE
+           WHEN EXCLUDED.country IS NULL OR EXCLUDED.country = '' THEN partner_profiles.country_city
+           ELSE CONCAT_WS(' / ', EXCLUDED.country, partner_profiles.city)
+         END,
+         updated_at = now()
+       RETURNING *`,
+      [req.partner.id, documentId || null, phone || null, phoneExtension || null, country || null],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner) })
   })
 
   app.put('/api/account/password', requireAuth, async (req, res) => {

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from '../app-router'
 import { fetchProfile, requestAuditorRole } from '../api'
+import { DashboardStageCarousel } from '../components/DashboardStageCarousel'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { saveUser, type PartnerUser } from '../constants'
-import { getAuditorProgress } from '../utils/auditorProgress'
+import { getAuditorProgress, DEFAULT_JOURNEY } from '../utils/auditorProgress'
 
 type DashboardContext = {
   user: PartnerUser
@@ -168,9 +169,9 @@ export function DashboardHome() {
             <>
               <QuickAction
                 to="/dashboard/documentos"
-                icon="upload"
-                title="Subir documentos"
-                description="Adjunta tu CV y constancias de experiencia."
+                icon="folder_open"
+                title="Repositorio de documentos"
+                description="Consulta, descarga y organiza los archivos de tu expediente."
               />
               <QuickAction
                 to="/dashboard/estado"
@@ -181,6 +182,11 @@ export function DashboardHome() {
             </>
           )}
         </div>
+        {isAuditor && (
+          <div className="mt-4 flex min-h-0 flex-1 flex-col">
+            <DashboardStageCarousel steps={progress?.journey || DEFAULT_JOURNEY} />
+          </div>
+        )}
       </div>
     </div>
   )
