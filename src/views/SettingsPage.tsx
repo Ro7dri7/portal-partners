@@ -12,7 +12,7 @@ import { MaterialIcon } from '../components/MaterialIcon'
 import { PasswordRequirements } from '../components/PasswordRequirements'
 import { SearchSelect } from '../components/SearchSelect'
 import { AVATAR_URL, saveUser, type PartnerUser } from '../constants'
-import { COUNTRY_OPTIONS } from '../data/locations'
+import { COUNTRY_SELECT_OPTIONS } from '../data/locations'
 import { getPasswordChecks, isPasswordValid } from '../utils/passwordValidation'
 
 type DashboardContext = {
@@ -352,7 +352,7 @@ export function SettingsPage() {
               <SearchSelect
                 id="country"
                 value={country}
-                options={COUNTRY_OPTIONS}
+                options={COUNTRY_SELECT_OPTIONS}
                 placeholder="Selecciona un país"
                 onChange={setCountry}
               />

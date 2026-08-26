@@ -15,6 +15,9 @@ interface ImportMetaEnv {
   readonly PGDATABASE?: string
   readonly PGUSER?: string
   readonly PGPASSWORD?: string
+  readonly RESEND_API_KEY?: string
+  readonly FROM_EMAIL?: string
+  readonly PORTAL_PUBLIC_URL?: string
 }
 
 interface ImportMeta {

@@ -8,6 +8,12 @@ import {
   COMMERCIAL_COORDINATOR_STORAGE_KEY,
   findCoordinatorByEmail,
 } from '../data/commercialCoordinators'
+import {
+  COUNTRY_SELECT_OPTIONS,
+  ORIGIN_COUNTRY_STORAGE_KEY,
+  findOriginCountry,
+} from '../data/locations'
+import { SearchSelect } from '../components/SearchSelect'
 
 const ROLES: Array<{
   id: UserRole
@@ -28,9 +34,10 @@ const ROLES: Array<{
 
 export function RoleSelectPage() {
   const navigate = useNavigate()
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [role, setRole] = useState<UserRole>('afiliado')
   const [coordinatorEmail, setCoordinatorEmail] = useState('')
+  const [country, setCountry] = useState('')
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -58,13 +65,27 @@ export function RoleSelectPage() {
     }
     sessionStorage.setItem('intercert_selected_role', role)
     sessionStorage.setItem(COMMERCIAL_COORDINATOR_STORAGE_KEY, coordinator.email)
-    navigate('/registro/cuenta', { state: { role, comercialEmail: coordinator.email } })
+    setError('')
+    setStep(3)
+  }
+
+  function handleContinueCountry() {
+    const selectedCountry = findOriginCountry(country)
+    if (!selectedCountry) {
+      setError('Selecciona tu país de procedencia.')
+      return
+    }
+    sessionStorage.setItem('intercert_selected_role', role)
+    sessionStorage.setItem(ORIGIN_COUNTRY_STORAGE_KEY, selectedCountry.name)
+    navigate('/registro/cuenta', {
+      state: { role, comercialEmail: coordinatorEmail, country: selectedCountry.name },
+    })
   }
 
   return (
     <AuthSplitLayout>
       <p className="mb-3 text-center text-label-sm font-semibold uppercase tracking-wide text-outline">
-        Paso {step} de 2
+        Paso {step} de 3
       </p>
 
       {step === 1 ? (
@@ -112,7 +133,7 @@ export function RoleSelectPage() {
             Continuar
           </button>
         </>
-      ) : (
+      ) : step === 2 ? (
         <div className="animate-fade-in">
           <div className="mb-8 text-center">
             <h1 className="mb-2 text-headline-md font-bold text-on-surface">
@@ -191,6 +212,60 @@ export function RoleSelectPage() {
               type="button"
               onClick={handleContinueCoordinator}
               disabled={!selected}
+              className="flex flex-1 items-center justify-center rounded-lg bg-primary-container px-4 py-3 text-label-md font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="animate-fade-in">
+          <div className="mb-8 text-center">
+            <h1 className="mb-2 text-headline-md font-bold text-on-surface">
+              ¿Cuál es tu país de procedencia?
+            </h1>
+            <p className="text-body-md text-on-surface-variant">
+              Escríbelo para filtrar el listado y selecciona tu país. Este dato quedará en tu perfil.
+            </p>
+          </div>
+
+          <div className="mb-8">
+            <label className="mb-2 block text-label-md font-semibold text-on-surface" htmlFor="origin-country">
+              País de procedencia
+            </label>
+            <SearchSelect
+              id="origin-country"
+              value={country}
+              options={COUNTRY_SELECT_OPTIONS}
+              placeholder="Busca tu país, ej. Perú, Colombia, México..."
+              onChange={(value) => {
+                setCountry(value)
+                setError('')
+              }}
+            />
+          </div>
+
+          {error && (
+            <p className="mb-4 rounded-lg bg-error-container px-3 py-2 text-body-md text-on-error-container">
+              {error}
+            </p>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setStep(2)
+                setError('')
+              }}
+              className="flex w-1/3 items-center justify-center rounded-lg border border-outline-variant px-4 py-3 text-label-md font-semibold text-primary transition-colors hover:bg-surface-container-low"
+            >
+              Atrás
+            </button>
+            <button
+              type="button"
+              onClick={handleContinueCountry}
+              disabled={!findOriginCountry(country)}
               className="flex flex-1 items-center justify-center rounded-lg bg-primary-container px-4 py-3 text-label-md font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               Continuar

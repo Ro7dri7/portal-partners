@@ -49,7 +49,112 @@ export const CITIES_BY_COUNTRY: Record<string, string[]> = {
   'Estados Unidos': ['Miami', 'Houston', 'Los Ángeles', 'Nueva York'],
 }
 
-export const COUNTRY_OPTIONS = PHONE_COUNTRIES.map((item) => item.name)
+export function flagFromIso(iso: string) {
+  return iso
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '')
+    .slice(0, 2)
+    .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
+}
+
+export type OriginCountry = {
+  iso: string
+  name: string
+  flag: string
+}
+
+const ORIGIN_COUNTRY_ROWS: Array<[string, string]> = [
+  ['PE', 'Perú'],
+  ['CO', 'Colombia'],
+  ['MX', 'México'],
+  ['CR', 'Costa Rica'],
+  ['AR', 'Argentina'],
+  ['BO', 'Bolivia'],
+  ['CL', 'Chile'],
+  ['EC', 'Ecuador'],
+  ['SV', 'El Salvador'],
+  ['GT', 'Guatemala'],
+  ['HN', 'Honduras'],
+  ['NI', 'Nicaragua'],
+  ['PA', 'Panamá'],
+  ['PY', 'Paraguay'],
+  ['UY', 'Uruguay'],
+  ['VE', 'Venezuela'],
+  ['BR', 'Brasil'],
+  ['CU', 'Cuba'],
+  ['DO', 'República Dominicana'],
+  ['PR', 'Puerto Rico'],
+  ['US', 'Estados Unidos'],
+  ['CA', 'Canadá'],
+  ['ES', 'España'],
+  ['PT', 'Portugal'],
+  ['FR', 'Francia'],
+  ['IT', 'Italia'],
+  ['DE', 'Alemania'],
+  ['GB', 'Reino Unido'],
+  ['IE', 'Irlanda'],
+  ['NL', 'Países Bajos'],
+  ['BE', 'Bélgica'],
+  ['CH', 'Suiza'],
+  ['AT', 'Austria'],
+  ['SE', 'Suecia'],
+  ['NO', 'Noruega'],
+  ['DK', 'Dinamarca'],
+  ['FI', 'Finlandia'],
+  ['PL', 'Polonia'],
+  ['CZ', 'Chequia'],
+  ['RO', 'Rumania'],
+  ['GR', 'Grecia'],
+  ['TR', 'Turquía'],
+  ['UA', 'Ucrania'],
+  ['RU', 'Rusia'],
+  ['CN', 'China'],
+  ['JP', 'Japón'],
+  ['KR', 'Corea del Sur'],
+  ['IN', 'India'],
+  ['AU', 'Australia'],
+  ['NZ', 'Nueva Zelanda'],
+  ['ZA', 'Sudáfrica'],
+  ['EG', 'Egipto'],
+  ['MA', 'Marruecos'],
+  ['NG', 'Nigeria'],
+  ['AE', 'Emiratos Árabes Unidos'],
+  ['SA', 'Arabia Saudita'],
+  ['IL', 'Israel'],
+  ['PH', 'Filipinas'],
+  ['ID', 'Indonesia'],
+  ['TH', 'Tailandia'],
+  ['VN', 'Vietnam'],
+  ['SG', 'Singapur'],
+  ['MY', 'Malasia'],
+  ['HT', 'Haití'],
+  ['JM', 'Jamaica'],
+  ['TT', 'Trinidad y Tobago'],
+  ['GY', 'Guyana'],
+  ['SR', 'Surinam'],
+  ['BZ', 'Belice'],
+]
+
+export const ORIGIN_COUNTRIES: OriginCountry[] = ORIGIN_COUNTRY_ROWS.map(([iso, name]) => ({
+  iso,
+  name,
+  flag: flagFromIso(iso),
+}))
+
+export const COUNTRY_OPTIONS = ORIGIN_COUNTRIES.map((item) => item.name)
+
+export const COUNTRY_SELECT_OPTIONS = ORIGIN_COUNTRIES.map((item) => ({
+  value: item.name,
+  label: item.name,
+  prefix: item.flag,
+}))
+
+export const ORIGIN_COUNTRY_STORAGE_KEY = 'intercert_origin_country'
+
+export function findOriginCountry(name: string | null | undefined) {
+  const normalized = String(name || '').trim().toLowerCase()
+  return ORIGIN_COUNTRIES.find((item) => item.name.toLowerCase() === normalized) || null
+}
 
 export function formatNational(digits: string, groups: number[], useFormat: boolean) {
   const clean = digits.replace(/\D/g, '')

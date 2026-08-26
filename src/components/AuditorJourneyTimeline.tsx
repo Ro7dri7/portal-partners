@@ -25,6 +25,10 @@ const STEP_COLORS = [
   { accent: '#0f9f6e', soft: '#d1fae5' },
 ]
 
+const MUTED_GREEN = '#4c9a78'
+const LOCKED_GRAY = '#9aa0b4'
+const LOCKED_BORDER = '#d3d6e2'
+
 function pad(index: number) {
   return String(index + 1).padStart(2, '0')
 }
@@ -122,50 +126,59 @@ function TimelineNode({
 }) {
   const color = STEP_COLORS[index % STEP_COLORS.length]
   const high = index % 2 === 0
-  const muted = step.state === 'pending' || step.state === 'locked'
   const rejected = step.state === 'rejected'
   const active = step.state === 'active'
   const done = step.state === 'done'
+  const locked = step.state === 'locked' || step.state === 'pending'
   const isDocuments = step.key === 'documents'
   const fill = isDocuments ? (step.fillPercent ?? 0) : done ? 100 : 0
-  const completeGreen = isDocuments ? fill >= 100 : done
-  const accent = rejected ? '#ba1a1a' : completeGreen ? '#0f9f6e' : color.accent
+  const completeGreen = done || (isDocuments && fill >= 100 && !active)
+  const accent = rejected
+    ? '#ba1a1a'
+    : completeGreen
+      ? MUTED_GREEN
+      : active
+        ? color.accent
+        : LOCKED_GRAY
   const iconName = completeGreen
     ? 'check_circle'
-    : step.state === 'locked'
+    : locked
       ? 'lock'
       : STEP_ICONS[step.key]
-  const iconOnFill = fill >= 48 || completeGreen
-  const iconColor = isDocuments
-    ? iconOnFill
+  const iconOnFill = completeGreen || (isDocuments && fill >= 48)
+  const iconColor = completeGreen || active
+    ? '#ffffff'
+    : isDocuments && iconOnFill
       ? '#ffffff'
-      : accent
-    : muted
-      ? '#9aa0b4'
-      : '#ffffff'
+      : LOCKED_GRAY
   const href = step.href
 
   const circle = (
     <div
       className={`relative z-20 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border-[4px] bg-white ${
         active ? 'timeline-pulse' : ''
-      } ${step.shine ? 'timeline-shine' : ''} ${href ? 'cursor-pointer transition-transform hover:scale-105' : ''}`}
+      } ${active && step.shine ? 'timeline-shine' : ''} ${href ? 'cursor-pointer transition-transform hover:scale-105' : ''}`}
       style={{
-        borderColor: muted && !step.shine ? '#d3d6e2' : accent,
-        opacity: muted && !isDocuments ? 0.38 : 1,
-        boxShadow: step.shine
-          ? `0 0 0 6px ${color.soft}, 0 10px 22px ${accent}33`
-          : `0 10px 18px ${accent}18`,
+        borderColor: completeGreen ? MUTED_GREEN : active ? color.accent : LOCKED_BORDER,
+        opacity: 1,
+        boxShadow: active
+          ? `0 0 0 6px ${color.soft}, 0 10px 22px ${color.accent}33`
+          : completeGreen
+            ? `0 8px 16px ${MUTED_GREEN}22`
+            : '0 6px 12px rgba(15, 23, 42, 0.06)',
       }}
     >
-      {isDocuments && (
+      {isDocuments && !completeGreen && (
         <div
-          className="timeline-water pointer-events-none absolute inset-x-0 bottom-0"
-          style={{ height: `${fill}%`, background: completeGreen ? '#0f9f6e' : accent }}
+          className={`pointer-events-none absolute inset-x-0 bottom-0 ${active ? 'timeline-water' : ''}`}
+          style={{ height: `${fill}%`, background: color.accent }}
         />
       )}
-      {!isDocuments && (done || active) && !muted && (
-        <div className="absolute inset-0" style={{ background: accent }} />
+      {(completeGreen || (active && !isDocuments)) && (
+        <div
+          className="absolute inset-0"
+          style={{ background: completeGreen ? MUTED_GREEN : color.accent }}
+        />
       )}
       <span className="relative z-10 flex flex-col items-center" style={{ color: iconColor }}>
         <MaterialIcon
@@ -173,7 +186,7 @@ function TimelineNode({
           filled={done || active || completeGreen}
           className="text-[32px]"
         />
-        {isDocuments && (
+        {isDocuments && !completeGreen && (
           <span className="text-[11px] font-extrabold leading-none">{fill}%</span>
         )}
       </span>
@@ -192,13 +205,13 @@ function TimelineNode({
     <div className={`min-w-0 ${compact ? '' : 'px-1 text-center'}`}>
       <p
         className="text-[22px] font-extrabold leading-none tracking-tight"
-        style={{ color: muted && !isDocuments ? '#9aa0b4' : accent }}
+        style={{ color: accent }}
       >
         {pad(index)}
       </p>
       <h4
         className="mt-1 text-label-md font-bold"
-        style={{ color: muted && !isDocuments ? '#767682' : accent }}
+        style={{ color: completeGreen ? MUTED_GREEN : active ? color.accent : '#767682' }}
       >
         {step.label}
       </h4>

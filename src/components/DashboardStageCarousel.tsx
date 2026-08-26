@@ -63,12 +63,20 @@ export function DashboardStageCarousel({ steps }: DashboardStageCarouselProps) {
         </p>
       </div>
 
-      <div className="relative min-h-0 flex-1">
-        <div className={slide === 0 ? 'h-full' : 'hidden'}>
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div
+          className={`absolute inset-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            slide === 0 ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
           <AuditorJourneyTimeline steps={steps} embedded />
         </div>
-        <div className={slide === 1 ? 'flex h-full min-h-[320px] flex-col' : 'hidden'}>
-          <div className="relative flex min-h-[320px] flex-1 items-center justify-center bg-primary">
+        <div
+          className={`absolute inset-0 flex flex-col transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            slide === 1 ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-primary">
             <video
               ref={videoRef}
               className="h-full max-h-[420px] w-full object-contain"

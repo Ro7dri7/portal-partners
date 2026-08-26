@@ -153,40 +153,42 @@ export function DashboardHome() {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <h3 className="mb-3 text-headline-sm font-semibold text-primary">Acciones Rápidas</h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <QuickAction
-            to="/dashboard/perfil"
-            icon="person"
-            title={isAuditor ? 'Completar mi perfil' : 'Ver mi perfil'}
-            description={
-              isAuditor
-                ? 'Revisión de documentos y formato IC.F.1.2 de registro de auditor.'
-                : 'Consulta los datos de tu cuenta de afiliado.'
-            }
-          />
-          {isAuditor && (
-            <>
-              <QuickAction
-                to="/dashboard/documentos"
-                icon="folder_open"
-                title="Repositorio de documentos"
-                description="Consulta, descarga y organiza los archivos de tu expediente."
-              />
-              <QuickAction
-                to="/dashboard/estado"
-                icon="search"
-                title="Ver estado de solicitud"
-                description="Revisa el avance real de tu formulario."
-              />
-            </>
-          )}
-        </div>
         {isAuditor && (
-          <div className="mt-4 flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col">
             <DashboardStageCarousel steps={progress?.journey || DEFAULT_JOURNEY} />
           </div>
         )}
+        <div className="mt-4 shrink-0">
+          <h3 className="mb-3 text-headline-sm font-semibold text-primary">Acciones Rápidas</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <QuickAction
+              to="/dashboard/perfil"
+              icon="person"
+              title={isAuditor ? 'Completar mi perfil' : 'Ver mi perfil'}
+              description={
+                isAuditor
+                  ? 'Revisión de documentos y formato IC.F.1.2 de registro de auditor.'
+                  : 'Consulta los datos de tu cuenta de afiliado.'
+              }
+            />
+            {isAuditor && (
+              <>
+                <QuickAction
+                  to="/dashboard/documentos"
+                  icon="folder_open"
+                  title="Repositorio de documentos"
+                  description="Consulta, descarga y organiza los archivos de tu expediente."
+                />
+                <QuickAction
+                  to="/dashboard/estado"
+                  icon="search"
+                  title="Ver estado de solicitud"
+                  description="Revisa el avance real de tu formulario."
+                />
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

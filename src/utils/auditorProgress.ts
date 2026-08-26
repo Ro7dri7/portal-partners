@@ -53,7 +53,6 @@ export const DEFAULT_JOURNEY: JourneyStep[] = [
     state: 'pending',
     fillPercent: 0,
     href: '/dashboard/perfil',
-    shine: true,
   },
   { key: 'review1', label: 'Fase 1', hint: 'Verificación', state: 'pending' },
   { key: 'icf12', label: 'IC.F.1.2', hint: 'Formato de registro', state: 'locked' },
@@ -313,7 +312,6 @@ export function getAuditorProgress(
       state: documentsFill >= 100 ? 'done' : 'pending',
       fillPercent: documentsFill,
       href: documentsFill === 0 ? '/dashboard/perfil' : '/dashboard/estado',
-      shine: true,
     },
     {
       key: 'review1',
@@ -345,7 +343,12 @@ export function getAuditorProgress(
   if (currentKey) {
     const currentIndex = journey.findIndex((step) => step.key === currentKey)
     if (currentIndex >= 0) {
-      journey[currentIndex] = { ...journey[currentIndex], state: 'active' }
+      journey[currentIndex] = { ...journey[currentIndex], state: 'active', shine: true }
+      for (let i = currentIndex + 1; i < journey.length; i += 1) {
+        if (journey[i].state !== 'done' && journey[i].state !== 'rejected') {
+          journey[i] = { ...journey[i], state: 'locked', shine: false }
+        }
+      }
     }
   }
 

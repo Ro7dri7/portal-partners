@@ -9,6 +9,7 @@ import {
   COMMERCIAL_COORDINATOR_STORAGE_KEY,
   findCoordinatorByEmail,
 } from '../data/commercialCoordinators'
+import { ORIGIN_COUNTRY_STORAGE_KEY, findOriginCountry } from '../data/locations'
 import { getPasswordChecks, isPasswordValid } from '../utils/passwordValidation'
 
 function readRole(stateRole: unknown): UserRole | null {
@@ -24,12 +25,20 @@ function readCoordinatorEmail(stateEmail: unknown): string {
   return findCoordinatorByEmail(stored)?.email || ''
 }
 
+function readOriginCountry(stateCountry: unknown): string {
+  const fromState = typeof stateCountry === 'string' ? findOriginCountry(stateCountry) : null
+  if (fromState) return fromState.name
+  const stored = sessionStorage.getItem(ORIGIN_COUNTRY_STORAGE_KEY)
+  return findOriginCountry(stored)?.name || ''
+}
+
 export function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const navState = location.state as { role?: unknown; comercialEmail?: unknown } | null
+  const navState = location.state as { role?: unknown; comercialEmail?: unknown; country?: unknown } | null
   const role = readRole(navState?.role)
   const comercialEmail = readCoordinatorEmail(navState?.comercialEmail)
+  const originCountry = readOriginCountry(navState?.country)
 
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -47,14 +56,14 @@ export function RegisterPage() {
   const passwordsMatch = confirmPassword.length === 0 || password === confirmPassword
 
   useEffect(() => {
-    if (!role || !comercialEmail) navigate('/registro', { replace: true })
-  }, [role, comercialEmail, navigate])
+    if (!role || !comercialEmail || !originCountry) navigate('/registro', { replace: true })
+  }, [role, comercialEmail, originCountry, navigate])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
 
-    if (!role || !comercialEmail) {
+    if (!role || !comercialEmail || !originCountry) {
       navigate('/registro', { replace: true })
       return
     }
@@ -85,11 +94,13 @@ export function RegisterPage() {
         confirmPassword,
         role,
         comercialEmail,
+        country: originCountry,
         terms,
       })
       saveSession(result.user, result.token)
       sessionStorage.removeItem('intercert_selected_role')
       sessionStorage.removeItem(COMMERCIAL_COORDINATOR_STORAGE_KEY)
+      sessionStorage.removeItem(ORIGIN_COUNTRY_STORAGE_KEY)
       navigate(postLoginPath(result.user), { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la cuenta.')
@@ -101,7 +112,7 @@ export function RegisterPage() {
   const inputClass =
     'w-full pl-10 pr-4 py-2 bg-surface rounded-lg border border-outline-variant text-on-surface text-body-md focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-colors'
 
-  if (!role || !comercialEmail) return null
+  if (!role || !comercialEmail || !originCountry) return null
 
   return (
     <AuthSplitLayout>

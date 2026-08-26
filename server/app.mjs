@@ -17,6 +17,18 @@ import {
   sanitizeFileName,
   uploadToR2,
 } from './r2.mjs'
+import {
+  isEmailConfigured,
+  queueEmail,
+  sendAuditorRequestReviewedEmail,
+  sendDocsApprovedEmail,
+  sendDocsReminderEmail,
+  sendOpsObservationEmail,
+  sendStatusChangeEmail,
+  sendTrainingPendingEmail,
+  sendVerifyCodeEmail,
+  sendWelcomePendingDocsEmail,
+} from './email.mjs'
 
 dotenv.config()
 
@@ -435,6 +447,145 @@ async function createPartnerNotification(partnerId, { title, body, link }) {
   )
 }
 
+async function loadPartnerForEmail(partnerId) {
+  if (!partnerId) return null
+  const { rows } = await getPool().query(
+    `SELECT id, email, first_name, last_name, role FROM partners WHERE id = $1`,
+    [partnerId],
+  )
+  return rows[0] || null
+}
+
+function formatDeadlineLabel(deadlineAt, durationLabel) {
+  if (durationLabel) return String(durationLabel)
+  if (!deadlineAt) return null
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+    }).format(new Date(deadlineAt))
+  } catch {
+    return String(deadlineAt)
+  }
+}
+
+const STATUS_EMAIL_MESSAGES = {
+  1: {
+    sent: 'Recibimos tu documentación de la revisión 1.',
+    in_review: 'Tu documentación de la revisión 1 está en revisión por Operaciones.',
+    validated: 'La documentación de la revisión 1 fue validada.',
+    approved: 'La fase 1 fue aprobada. Ya puedes continuar con el formato IC.F.1.2.',
+    rejected: 'La revisión 1 fue observada. Corrige los documentos marcados y vuelve a enviarla.',
+  },
+  2: {
+    sent: 'Recibimos el formato IC.F.1.2.',
+    in_review: 'Tu formato IC.F.1.2 está en revisión por Operaciones.',
+    validated: 'El formato IC.F.1.2 fue validado.',
+    approved: 'La fase 2 fue aprobada. Completaste el registro de auditor.',
+    rejected: 'La revisión 2 fue observada. Corrige el formato IC.F.1.2 y vuelve a enviarlo.',
+  },
+}
+
+function queuePartnerStatusEmails(partner, { stage, status }) {
+  if (!partner?.email) return
+  const phase = Number(stage) === 2 ? 2 : 1
+  const message = STATUS_EMAIL_MESSAGES[phase]?.[status] || 'Hay una actualización en el estado de tu solicitud.'
+  if (status === 'approved') {
+    queueEmail(async () => {
+      await sendDocsApprovedEmail(partner, { stage: phase })
+      if (phase === 2) {
+        const mailed = await sendTrainingPendingEmail(partner)
+        if (mailed.sent) {
+          await getPool().query(
+            `UPDATE partners SET last_training_notice_at = now() WHERE id = $1`,
+            [partner.id],
+          )
+        }
+        await createPartnerNotification(partner.id, {
+          title: 'Capacitación pendiente',
+          body: 'Tienes capacitaciones pendientes por revisar en el Centro de Capacitación.',
+          link: '/dashboard/capacitacion',
+        })
+      }
+    })
+    return
+  }
+  queueEmail(() => sendStatusChangeEmail(partner, { stage: phase, status, message }))
+}
+
+async function sendPendingDocsReminders() {
+  if (!isEmailConfigured()) return
+  await ensureMigrated()
+  const { rows } = await getPool().query(
+    `UPDATE partners p
+     SET last_docs_reminder_at = now()
+     WHERE p.id IN (
+       SELECT id FROM partners
+       WHERE role IN ('partner_auditor', 'afiliado')
+         AND documents_unlocked = true
+         AND documents_submitted_at IS NULL
+         AND COALESCE(created_at, updated_at) < now() - interval '20 hours'
+         AND (last_docs_reminder_at IS NULL OR last_docs_reminder_at < now() - interval '2 days')
+       ORDER BY COALESCE(created_at, updated_at)
+       LIMIT 40
+     )
+     RETURNING id, email, first_name, last_name, role`,
+  )
+  for (const partner of rows) {
+    queueEmail(async () => {
+      await sendDocsReminderEmail(partner)
+      await createPartnerNotification(partner.id, {
+        title: 'Documentación pendiente',
+        body: 'Aún no has enviado tus documentos. Completa y envía tu solicitud para continuar.',
+        link: '/dashboard/perfil',
+      })
+    })
+  }
+
+  const { rows: trainingDue } = await getPool().query(
+    `UPDATE partners p
+     SET last_training_notice_at = now()
+     WHERE p.id IN (
+       SELECT p2.id
+       FROM partners p2
+       LEFT JOIN partner_profiles pr ON pr.partner_id = p2.id
+       WHERE p2.role IN ('partner_auditor', 'afiliado')
+         AND p2.last_training_notice_at IS NULL
+         AND (
+           pr.review2_status = 'approved'
+           OR (
+             p2.role = 'afiliado'
+             AND COALESCE(p2.created_at, p2.updated_at) < now() - interval '20 hours'
+           )
+         )
+       LIMIT 40
+     )
+     RETURNING p.id, p.email, p.first_name, p.last_name, p.role`,
+  )
+  for (const partner of trainingDue) {
+    queueEmail(async () => {
+      await sendTrainingPendingEmail(partner)
+      await createPartnerNotification(partner.id, {
+        title: 'Capacitación pendiente',
+        body: 'Tienes capacitaciones pendientes por revisar en el Centro de Capacitación.',
+        link: '/dashboard/capacitacion',
+      })
+    })
+  }
+}
+
+function startPartnerEmailJobs() {
+  if (globalThis.__partnerEmailJobsStarted) return
+  globalThis.__partnerEmailJobsStarted = true
+  const run = () => {
+    sendPendingDocsReminders().catch((err) => {
+      console.warn('[email] recordatorios', err?.message || err)
+    })
+  }
+  setTimeout(run, 60_000)
+  setInterval(run, 6 * 60 * 60 * 1000)
+}
+
 function publicUser(row) {
   return {
     id: row.id,
@@ -464,6 +615,9 @@ async function migrate() {
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS email_verify_expires_at TIMESTAMPTZ;
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS comercial_email TEXT;
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS comercial_name TEXT;
+    ALTER TABLE partners ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE partners ADD COLUMN IF NOT EXISTS last_docs_reminder_at TIMESTAMPTZ;
+    ALTER TABLE partners ADD COLUMN IF NOT EXISTS last_training_notice_at TIMESTAMPTZ;
   `)
 
   await getPool().query(`
@@ -719,6 +873,7 @@ export function createApi() {
     const role = req.body?.role === 'partner_auditor' ? 'partner_auditor' : 'afiliado'
     const terms = Boolean(req.body?.terms)
     const coordinator = resolveCoordinator(req.body?.comercialEmail)
+    const country = String(req.body?.country || '').trim()
 
     if (!firstName || !lastName || !email) {
       res.status(400).json({ error: 'Completa todos los campos requeridos.' })
@@ -726,6 +881,10 @@ export function createApi() {
     }
     if (!coordinator) {
       res.status(400).json({ error: 'Selecciona el coordinador comercial que te refirió.' })
+      return
+    }
+    if (!country) {
+      res.status(400).json({ error: 'Selecciona tu país de procedencia.' })
       return
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -761,10 +920,23 @@ export function createApi() {
        RETURNING *`,
       [firstName, lastName, email, passwordHash, role, documentsUnlocked, coordinator.email, coordinator.name],
       )
+      await getPool().query(
+        `INSERT INTO partner_profiles (partner_id, country, country_city, updated_at)
+         VALUES ($1, $2, $2, now())
+         ON CONFLICT (partner_id) DO UPDATE SET
+           country = EXCLUDED.country,
+           country_city = CASE
+             WHEN partner_profiles.city IS NULL OR partner_profiles.city = '' THEN EXCLUDED.country
+             ELSE CONCAT_WS(' / ', EXCLUDED.country, partner_profiles.city)
+           END,
+           updated_at = now()`,
+        [rows[0].id, country],
+      )
 
       const user = publicUser(rows[0])
       const token = signToken({ id: user.id })
       setSessionCookies(res, user, token)
+      queueEmail(() => sendWelcomePendingDocsEmail(rows[0]))
       res.status(201).json({ user, token })
     } catch (error) {
       if (error?.code === '23505') {
@@ -1459,6 +1631,7 @@ export function createApi() {
       profile: profileRows[0],
       documents: docRows,
     })
+    queuePartnerStatusEmails(partnerRows[0], { stage: 1, status: 'sent' })
     res.json({
       user: publicUser(partnerRows[0]),
       profile: publicProfile(profileRows[0], partnerRows[0]),
@@ -1533,6 +1706,7 @@ export function createApi() {
       profile: profileRows[0],
       documents: docRows,
     })
+    queuePartnerStatusEmails(partnerRows[0], { stage: 2, status: 'sent' })
     res.json({
       user: publicUser(partnerRows[0]),
       profile: publicProfile(profileRows[0], partnerRows[0]),
@@ -1638,6 +1812,20 @@ export function createApi() {
         : `${who} te envió un comentario sobre tu solicitud ${appRows[0].public_code}.`,
       link: '/dashboard/estado',
     })
+    const partner = await loadPartnerForEmail(appRows[0].partner_id)
+    if (partner) {
+      const deadlineLabel = formatDeadlineLabel(deadlineAt, deadlineDurationLabel)
+      const referencedLabels = referencedDocs.map((item) => labelDocSlot(item))
+      queueEmail(() =>
+        sendOpsObservationEmail(partner, {
+          authorName: authorName || 'Operaciones',
+          body,
+          referencedDocs: referencedLabels,
+          deadlineLabel,
+          publicCode: appRows[0].public_code,
+        }),
+      )
+    }
     res.status(201).json({
       comment: publicComment(rows[0]),
     })
@@ -1687,6 +1875,16 @@ export function createApi() {
        WHERE id = $3`,
       [status, status === 'approved', request.partner_id],
     )
+
+    const partner = await loadPartnerForEmail(request.partner_id)
+    if (partner) {
+      queueEmail(() =>
+        sendAuditorRequestReviewedEmail(partner, {
+          approved: status === 'approved',
+          note,
+        }),
+      )
+    }
 
     res.json({ ok: true, status })
   })
@@ -1879,6 +2077,8 @@ export function createApi() {
           link: '/dashboard/estado',
         })
       }
+      const partner = await loadPartnerForEmail(partnerId)
+      queuePartnerStatusEmails(partner, { stage, status })
     }
 
     res.json({ ok: true, stage, status })
@@ -2050,8 +2250,11 @@ export function createApi() {
        WHERE id = $2`,
       [hash, req.partner.id],
     )
-    console.info(`Código de verificación para ${req.partner.email}: ${code}`)
-    res.json({ sent: true, previewCode: code })
+    const mailed = await sendVerifyCodeEmail(req.partner, code)
+    if (!mailed.sent) {
+      console.info(`Código de verificación para ${req.partner.email}: ${code}`)
+    }
+    res.json({ sent: mailed.sent || true, previewCode: mailed.sent ? undefined : code })
   })
 
   app.post('/api/account/email/verify', requireAuth, async (req, res) => {
@@ -2100,6 +2303,8 @@ export function createApi() {
     console.error(error)
     res.status(500).json({ error: 'Error interno del servidor.' })
   })
+
+  startPartnerEmailJobs()
 
   return (req, res, next) => {
     if (!req.url?.startsWith('/api')) {

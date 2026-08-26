@@ -30,6 +30,7 @@ export function registerAccount(payload: {
   confirmPassword: string
   role: 'afiliado' | 'partner_auditor'
   comercialEmail: string
+  country: string
   terms: boolean
 }) {
   return request<AuthResponse>('/api/register', {
