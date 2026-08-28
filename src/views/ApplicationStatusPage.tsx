@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { Link, useOutletContext } from '../app-router'
+import { Link, useNavigate, useOutletContext } from '../app-router'
 import {
   fetchProfile,
   postStatusComment,
@@ -114,16 +114,80 @@ function ActivityComment({ comment }: { comment: StatusComment }) {
   )
 }
 
+type ChatKey = 'fase_1' | 'fase_2' | 'fase_3'
+
+const CHATS: Array<{ key: ChatKey; label: string; hint: string }> = [
+  { key: 'fase_1', label: 'FASE 1', hint: 'Verificación de documentación' },
+  { key: 'fase_2', label: 'FASE 2', hint: 'Formato IC.F.1.2' },
+  { key: 'fase_3', label: 'FASE 3', hint: 'Contrato comercial' },
+]
+
+function chatReadStorageKey(userId: string, chat: ChatKey) {
+  return `portal-chat-read:${userId}:${chat}`
+}
+
+function loadChatReads(userId: string): Record<ChatKey, number> {
+  const reads: Record<ChatKey, number> = { fase_1: 0, fase_2: 0, fase_3: 0 }
+  if (typeof window === 'undefined') return reads
+  for (const chat of CHATS) {
+    const raw = window.localStorage.getItem(chatReadStorageKey(userId, chat.key))
+    const ts = raw ? Date.parse(raw) : 0
+    reads[chat.key] = Number.isFinite(ts) ? ts : 0
+  }
+  return reads
+}
+
+function persistChatRead(userId: string, chat: ChatKey, at = Date.now()) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(chatReadStorageKey(userId, chat), new Date(at).toISOString())
+}
+
+function classifyCommentChat(comment: StatusComment): ChatKey {
+  if (comment.track === 'commercial') return 'fase_3'
+  if (comment.track === 'fase_2') return 'fase_2'
+  if (comment.track === 'fase_1') return 'fase_1'
+  const text = String(comment.body || '').toLowerCase()
+  if (
+    text.includes('ic.f.1.2') ||
+    text.includes('revisión 2') ||
+    text.includes('revision 2') ||
+    text.includes('fase 2')
+  ) {
+    return 'fase_2'
+  }
+  if (text.includes('contrato') || text.includes('comercial')) return 'fase_3'
+  return 'fase_1'
+}
+
+function classifyActivityChat(item: string): ChatKey {
+  const text = item.toLowerCase()
+  if (text.includes('contrato') || text.includes('comercial')) return 'fase_3'
+  if (text.includes('ic.f.1.2') || text.includes('revisión 2') || text.includes('fase 2')) {
+    return 'fase_2'
+  }
+  return 'fase_1'
+}
+
+function commentTrackForChat(chat: ChatKey): 'fase_1' | 'fase_2' | 'commercial' {
+  if (chat === 'fase_3') return 'commercial'
+  if (chat === 'fase_2') return 'fase_2'
+  return 'fase_1'
+}
+
 export function ApplicationStatusPage() {
   const { user } = useOutletContext<DashboardContext>()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [documents, setDocuments] = useState<Array<{ category: string; file_name: string }>>([])
   const [application, setApplication] = useState<{ publicCode: string; status: string } | null>(
     null,
   )
   const [comments, setComments] = useState<StatusComment[]>([])
+  const [commercialComments, setCommercialComments] = useState<StatusComment[]>([])
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
+  const [activeChat, setActiveChat] = useState<ChatKey | null>(null)
+  const [chatReads, setChatReads] = useState<Record<ChatKey, number>>(() => loadChatReads(user.id))
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -134,28 +198,80 @@ export function ApplicationStatusPage() {
         setDocuments(data.documents)
         setApplication(data.application)
         setComments(data.comments)
+        setCommercialComments(data.commercialComments || [])
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'No se pudo cargar el estado.')
       })
   }, [user.role])
 
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [comments.length])
-
   const progress = useMemo(
     () => (profile ? getAuditorProgress(profile, documents) : null),
     [profile, documents],
   )
 
+  const allComments = useMemo(
+    () => [...comments, ...commercialComments],
+    [comments, commercialComments],
+  )
+
+  const chatThreads = useMemo(() => {
+    const buckets: Record<ChatKey, Array<{ id: string; sort: number; node: 'system' | 'comment'; text?: string; comment?: StatusComment }>> = {
+      fase_1: [],
+      fase_2: [],
+      fase_3: [],
+    }
+    for (const item of progress?.activity || []) {
+      const chat = classifyActivityChat(item)
+      buckets[chat].push({
+        id: `sys-${chat}-${item}`,
+        sort: 0,
+        node: 'system',
+        text: item,
+      })
+    }
+    for (const comment of allComments) {
+      const chat = classifyCommentChat(comment)
+      buckets[chat].push({
+        id: comment.id,
+        sort: new Date(comment.createdAt).getTime(),
+        node: 'comment',
+        comment,
+      })
+    }
+    return {
+      fase_1: buckets.fase_1.sort((a, b) => a.sort - b.sort),
+      fase_2: buckets.fase_2.sort((a, b) => a.sort - b.sort),
+      fase_3: buckets.fase_3.sort((a, b) => a.sort - b.sort),
+    }
+  }, [allComments, progress?.activity])
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+  }, [activeChat, chatThreads])
+
+  useEffect(() => {
+    if (!activeChat) return
+    const at = Date.now()
+    persistChatRead(user.id, activeChat, at)
+    setChatReads((prev) => ({ ...prev, [activeChat]: at }))
+  }, [activeChat, activeChat ? chatThreads[activeChat].length : 0, user.id])
+
+  const visibleTracks = progress?.phaseTracks || []
+  const activeThread = activeChat ? chatThreads[activeChat] : []
+  const activeMeta = CHATS.find((item) => item.key === activeChat)
+
   async function addComment() {
     const text = draft.trim()
-    if (!text || !application) return
+    if (!text || !application || !activeChat) return
     setError('')
     try {
-      const result = await postStatusComment(text)
-      setComments((prev) => [...prev, result.comment])
+      const result = await postStatusComment(text, commentTrackForChat(activeChat))
+      if (activeChat === 'fase_3') {
+        setCommercialComments((prev) => [...prev, result.comment])
+      } else {
+        setComments((prev) => [...prev, result.comment])
+      }
       setDraft('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo enviar el comentario.')
@@ -172,6 +288,14 @@ export function ApplicationStatusPage() {
       e.preventDefault()
       void addComment()
     }
+  }
+
+  function goBack() {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back()
+      return
+    }
+    navigate('/dashboard')
   }
 
   if (!isPartnerAuditor(user.role)) {
@@ -224,16 +348,24 @@ export function ApplicationStatusPage() {
 
   return (
     <div className="mx-auto max-w-container-max">
+      <button
+        type="button"
+        onClick={goBack}
+        className="mb-3 inline-flex items-center gap-1 text-label-md font-semibold text-secondary hover:underline"
+      >
+        <MaterialIcon name="arrow_back" className="text-[18px]" />
+        Volver
+      </button>
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h2 className="mb-1 text-headline-lg font-bold tracking-tight text-primary">
             Estado de solicitud
           </h2>
           <p className="text-body-lg text-on-surface-variant">
-            Seguimiento de tu validación como Partner Auditor.
+            Seguimiento de tu validación y contrato comercial.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-label-md font-semibold text-on-surface-variant">
             ID de solicitud:
           </span>
@@ -264,7 +396,7 @@ export function ApplicationStatusPage() {
             </div>
 
             <div className="space-y-8">
-              {progress.phaseTracks.map((track) => {
+              {visibleTracks.map((track) => {
                 const lastIdx = track.steps.reduce(
                   (acc, step, index) =>
                     step.state === 'done' || step.state === 'active' || step.state === 'rejected'
@@ -278,6 +410,7 @@ export function ApplicationStatusPage() {
                 const phaseDocs = track.steps.find((step) => step.docs?.length)?.docs || []
                 const showDocs =
                   track.unlocked &&
+                  !track.complete &&
                   phaseDocs.length > 0 &&
                   track.steps.some((step) => step.state !== 'pending')
                 return (
@@ -290,7 +423,11 @@ export function ApplicationStatusPage() {
                     <p className="text-body-md text-on-surface-variant">{track.subtitle}</p>
                     {!track.unlocked && (
                       <p className="mt-1 text-label-md font-semibold text-on-surface-variant">
-                        Se habilita al completar la fase 1.
+                        {track.key === 'commercial'
+                          ? 'Se habilita cuando envías el contrato comercial.'
+                          : track.key === 'review2'
+                            ? 'Se habilita al completar la fase 1.'
+                            : ''}
                       </p>
                     )}
                   </div>
@@ -307,7 +444,7 @@ export function ApplicationStatusPage() {
                       <div className="relative z-10 flex w-full items-start justify-between">
                         {track.steps.map((step, index) => (
                           <Step
-                            key={step.key}
+                            key={`${track.key}-${step.label}-${index}`}
                             state={
                               step.state === 'rejected'
                                 ? 'rejected'
@@ -356,87 +493,130 @@ export function ApplicationStatusPage() {
                 Continuar con IC.F.1.2
               </Link>
             )}
-          </div>
-
-          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-lg shadow-level-1">
-            <h3 className="mb-4 text-headline-sm font-semibold text-primary">Avance del formulario</h3>
-            <ul className="space-y-3">
-              <ChecklistItem done={progress.review1Docs} label="Documentos de la revisión 1" />
-              <ChecklistItem
-                done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review1Status)}
-                label="Revisión 1 enviada"
-              />
-              <ChecklistItem done={progress.review1Done} label="Fase 1 aprobada" />
-              <ChecklistItem
-                done={['sent', 'in_review', 'validated', 'approved'].includes(progress.review2Status)}
-                label="Formato IC.F.1.2 enviado"
-              />
-              <ChecklistItem done={progress.review2Done} label="Fase 2 aprobada" />
-            </ul>
-            <div className="mt-5">
-              <div className="mb-2 flex items-center justify-between text-label-md">
-                <span className="text-on-surface-variant">Progreso</span>
-                <span className="font-semibold text-secondary">{progress.percent}%</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-surface-variant">
-                <div
-                  className="h-2.5 rounded-full bg-secondary"
-                  style={{ width: `${progress.percent}%` }}
-                />
-              </div>
-            </div>
+            {progress.review2Done && !progress.commercialSubmitted && (
+              <Link
+                to="/dashboard/perfil?etapa=documents"
+                className="mt-2 inline-flex rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary hover:bg-primary/90"
+              >
+                Continuar con el contrato comercial
+              </Link>
+            )}
           </div>
         </div>
 
-        <div className="flex flex-col gap-gutter self-start lg:col-span-4">
-          <div className="flex w-full flex-col rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-md shadow-level-1">
-            <div className="mb-3 flex items-center gap-2 border-b border-outline-variant/30 pb-3">
-              <MaterialIcon name="forum" className="text-secondary" />
-              <h3 className="text-headline-sm font-semibold text-primary">Actividad</h3>
-            </div>
-
-            <div ref={listRef} className="max-h-[280px] space-y-3 overflow-y-auto">
-              {progress.activity.map((item) => (
-                <div
-                  key={item}
-                  className="mr-4 rounded-lg border border-outline-variant/20 bg-surface p-3"
-                >
-                  <p className="text-label-md font-bold text-primary">Sistema</p>
-                  <p className="text-sm text-on-surface-variant">{item}</p>
+        <div className="flex flex-col self-start lg:col-span-4">
+          <div className="flex h-[560px] w-full flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-level-1">
+            {!activeChat ? (
+              <>
+                <div className="bg-[#0A165E] px-4 py-3 text-white">
+                  <p className="text-label-md font-bold">Mensajes</p>
+                  <p className="text-[11px] text-white/70">Elige una fase para ver el chat</p>
                 </div>
-              ))}
-              {comments.map((comment) => (
-                <ActivityComment key={comment.id} comment={comment} />
-              ))}
-            </div>
-
-            {error && <p className="mt-2 text-label-md text-error">{error}</p>}
-
-            <form onSubmit={handleSubmit} className="mt-3 space-y-2">
-              <div className="relative">
-                <textarea
-                  rows={2}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  disabled={!application}
-                  placeholder={
-                    application
-                      ? 'Escribe un comentario o pregunta...'
-                      : 'Envía el formulario para chatear con el coordinador'
-                  }
-                  className="w-full resize-none rounded-lg border border-outline-variant bg-surface-container-low py-2 pl-3 pr-10 text-sm text-on-surface transition-all focus:border-secondary focus:outline-none disabled:opacity-60"
-                />
-                <button
-                  type="submit"
-                  disabled={!draft.trim() || !application}
-                  className="absolute bottom-3 right-2 text-secondary transition-colors hover:text-primary disabled:opacity-40"
-                  aria-label="Enviar comentario"
-                >
-                  <MaterialIcon name="send" className="text-[20px]" />
-                </button>
+                <div className="min-h-0 flex-1 overflow-y-auto bg-[#f0f2f5]">
+                  {CHATS.map((chat) => {
+                    const thread = chatThreads[chat.key]
+                    const last = thread[thread.length - 1]
+                    const preview =
+                      last?.node === 'comment'
+                        ? last.comment?.body || ''
+                        : last?.text || 'Sin mensajes'
+                    const unread = thread.filter((item) => {
+                      if (item.node !== 'comment' || !item.comment) return false
+                      if (item.comment.authorRole === 'applicant') return false
+                      return new Date(item.comment.createdAt).getTime() > (chatReads[chat.key] || 0)
+                    }).length
+                    return (
+                      <button
+                        key={chat.key}
+                        type="button"
+                        onClick={() => setActiveChat(chat.key)}
+                        className="flex w-full items-start justify-between gap-3 border-b border-outline-variant/20 px-4 py-3 text-left hover:bg-white"
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-[12px] font-black tracking-wide text-[#0A165E]">
+                            {chat.label}
+                          </span>
+                          <span className="block truncate text-[11px] text-on-surface-variant">
+                            {chat.hint}
+                          </span>
+                          <span className="mt-1 block truncate text-[11px] text-[#667781]">
+                            {preview}
+                          </span>
+                        </span>
+                        {unread > 0 ? (
+                          <span className="mt-1 inline-flex min-w-[22px] shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1.5 py-0.5 text-[11px] font-bold text-white">
+                            {unread > 99 ? '99+' : unread}
+                          </span>
+                        ) : null}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col bg-[#ece5dd]">
+                <div className="flex items-center gap-2 border-b border-black/5 bg-[#0A165E] px-2 py-2 text-white">
+                  <button
+                    type="button"
+                    onClick={() => setActiveChat(null)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-white/10"
+                    aria-label="Volver a la lista de chats"
+                  >
+                    <MaterialIcon name="arrow_back" className="text-[22px]" />
+                  </button>
+                  <div className="min-w-0">
+                    <p className="text-label-md font-bold">{activeMeta?.label}</p>
+                    <p className="text-[11px] text-white/70">{activeMeta?.hint}</p>
+                  </div>
+                </div>
+                <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+                  {activeThread.length === 0 ? (
+                    <p className="rounded-lg bg-white/80 px-3 py-2 text-center text-sm text-on-surface-variant">
+                      Aún no hay mensajes en esta fase.
+                    </p>
+                  ) : (
+                    activeThread.map((item) =>
+                      item.node === 'system' ? (
+                        <div
+                          key={item.id}
+                          className="mx-auto max-w-[90%] rounded-md bg-[#fff5c4] px-3 py-1.5 text-center text-[12px] text-[#5a4b12]"
+                        >
+                          {item.text}
+                        </div>
+                      ) : item.comment ? (
+                        <ActivityComment key={item.id} comment={item.comment} />
+                      ) : null,
+                    )
+                  )}
+                </div>
+                {error && <p className="px-3 text-label-md text-error">{error}</p>}
+                <form onSubmit={handleSubmit} className="bg-[#f0f2f5] p-2">
+                  <div className="relative">
+                    <textarea
+                      rows={2}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      disabled={!application}
+                      placeholder={
+                        application
+                          ? `Escribe un mensaje en ${activeMeta?.label}…`
+                          : 'Envía el formulario para chatear con el coordinador'
+                      }
+                      className="w-full resize-none rounded-2xl border-0 bg-white py-2 pl-3 pr-10 text-sm text-on-surface shadow-sm focus:outline-none disabled:opacity-60"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!draft.trim() || !application}
+                      className="absolute bottom-3 right-2 text-[#0A165E] transition-colors hover:text-secondary disabled:opacity-40"
+                      aria-label="Enviar comentario"
+                    >
+                      <MaterialIcon name="send" className="text-[20px]" />
+                    </button>
+                  </div>
+                </form>
               </div>
-            </form>
+            )}
           </div>
         </div>
       </div>
@@ -444,24 +624,16 @@ export function ApplicationStatusPage() {
   )
 }
 
-function ChecklistItem({ done, label }: { done: boolean; label: string }) {
-  return (
-    <li className="flex items-center gap-2 text-body-md">
-      <MaterialIcon
-        name={done ? 'check_circle' : 'radio_button_unchecked'}
-        filled={done}
-        className={done ? 'text-success' : 'text-outline'}
-      />
-      <span className={done ? 'text-on-surface' : 'text-on-surface-variant'}>{label}</span>
-    </li>
-  )
-}
-
 function PhaseDocOutcomes({
   docs,
   observed,
 }: {
-  docs: Array<{ category: string; label: string; status: 'approved' | 'rejected' | 'pending' }>
+  docs: Array<{
+    category: string
+    label: string
+    status: 'approved' | 'rejected' | 'pending'
+    href?: string
+  }>
   observed: boolean
 }) {
   const approved = docs.filter((doc) => doc.status === 'approved').length
@@ -501,17 +673,32 @@ function PhaseDocOutcomes({
                     : 'text-on-surface-variant'
               }`}
             />
-            <span
-              className={
-                doc.status === 'rejected'
-                  ? 'font-semibold text-error'
-                  : doc.status === 'approved'
-                    ? 'text-on-surface'
-                    : 'text-on-surface-variant'
-              }
-            >
-              {doc.label}
-            </span>
+            {doc.href ? (
+              <Link
+                to={doc.href}
+                className={`underline-offset-2 hover:underline ${
+                  doc.status === 'rejected'
+                    ? 'font-semibold text-error'
+                    : doc.status === 'approved'
+                      ? 'text-on-surface'
+                      : 'text-on-surface-variant'
+                }`}
+              >
+                {doc.label}
+              </Link>
+            ) : (
+              <span
+                className={
+                  doc.status === 'rejected'
+                    ? 'font-semibold text-error'
+                    : doc.status === 'approved'
+                      ? 'text-on-surface'
+                      : 'text-on-surface-variant'
+                }
+              >
+                {doc.label}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -536,7 +723,7 @@ function Step({
 }) {
   return (
     <div
-      className={`flex w-1/3 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}
+      className={`flex min-w-0 flex-1 flex-col items-center gap-2 ${state === 'pending' ? 'opacity-50' : ''}`}
     >
       {state === 'done' && (
         <div

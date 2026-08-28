@@ -3,6 +3,7 @@ import { Link } from '../app-router'
 import {
   confirmIcf12Download,
   deleteDocument,
+  fetchDocumentFile,
   fetchProfile,
   submitReview1,
   submitReview2,
@@ -18,6 +19,7 @@ import { saveUser, type PartnerUser } from '../constants'
 type RegistrationPhasesProps = {
   setUser: (user: PartnerUser) => void
   onProfile: (profile: ProfessionalProfile) => void
+  focusDoc?: string
 }
 
 const REVIEW1_DOCS = [
@@ -64,27 +66,39 @@ const ICF12_URL = '/formats/IC.F.1.2-Application-and-Auditor-Registration-Initia
 
 function itemStatus(
   ready: boolean,
-  reviewStatus: ReviewStatus | Review2Status,
+  phaseStatus: ReviewStatus | Review2Status,
+  docReview: 'pending' | 'approved' | 'rejected' = 'pending',
   locked = false,
 ): ReviewTaskStatus {
   if (locked) return 'locked'
-  if (reviewStatus === 'approved') return 'approved'
-  if (reviewStatus === 'rejected') return ready ? 'ready' : 'rejected'
-  if (reviewStatus === 'in_review' || reviewStatus === 'sent' || reviewStatus === 'validated') {
+  if (docReview === 'approved' || phaseStatus === 'approved') return 'approved'
+  if (docReview === 'rejected') return 'rejected'
+  if (phaseStatus === 'in_review' || phaseStatus === 'sent' || phaseStatus === 'validated') {
     return ready ? 'in_review' : 'pending'
   }
   return ready ? 'ready' : 'pending'
+}
+
+function canReplaceCategory(
+  phaseStatus: ReviewStatus | Review2Status | string,
+  docReview: 'pending' | 'approved' | 'rejected',
+) {
+  if (phaseStatus === 'rejected') return docReview === 'rejected'
+  return !['sent', 'in_review', 'validated', 'approved'].includes(String(phaseStatus))
 }
 
 function phaseSubmitted(status: string) {
   return ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(status)
 }
 
-export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesProps) {
+export function RegistrationPhases({ setUser, onProfile, focusDoc = '' }: RegistrationPhasesProps) {
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [extraZones, setExtraZones] = useState<Record<string, number>>({})
+  const [askIcf12Confirm, setAskIcf12Confirm] = useState(false)
+  const [icf12DonePopup, setIcf12DonePopup] = useState(false)
 
   useEffect(() => {
     fetchProfile()
@@ -99,6 +113,7 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
             category: doc.category,
             status: 'uploaded' as const,
             documentId: String(doc.id),
+            reviewStatus: doc.review_status || 'pending',
           })),
         )
       })
@@ -111,11 +126,6 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
     setFiles((prev) => {
       let next = [...prev]
       for (const file of incoming) {
-        const spec = REVIEW1_DOCS.find((item) => item.category === file.category)
-        const single = file.category === 'icf12' || (spec && !spec.multiple)
-        if (single) {
-          next = next.filter((item) => item.category !== file.category || item.id === file.id)
-        }
         const index = next.findIndex((item) => item.id === file.id)
         if (index >= 0) next[index] = { ...next[index], ...file }
         else next.push(file)
@@ -126,13 +136,29 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
 
   function removeFile(id: string) {
     const current = files.find((file) => file.id === id)
+    if (!current) return
+    const phase = current.category === 'icf12' ? review2Status : review1Status
+    const docReview = current.reviewStatus || 'pending'
+    if (!canReplaceCategory(phase, docReview)) return
     setFiles((prev) => prev.filter((file) => file.id !== id))
-    if (current?.documentId) {
+    if (current.documentId) {
       void deleteDocument(current.documentId).catch(() => {})
     }
   }
 
-  const validFiles = files.filter((file) => file.status === 'uploaded')
+  function addExtraZone(category: string) {
+    setExtraZones((prev) => ({
+      ...prev,
+      [category]: Math.min(4, (prev[category] || 0) + 1),
+    }))
+  }
+
+  function removeExtraZone(category: string) {
+    setExtraZones((prev) => ({
+      ...prev,
+      [category]: Math.max(0, (prev[category] || 0) - 1),
+    }))
+  }
   const review1Status = profile?.review1Status || 'pending'
   const review2Status = profile?.review2Status || 'locked'
   const trainingDone = Boolean(profile?.trainingCompleted)
@@ -140,6 +166,11 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
   const trainingUnlocked = phaseSubmitted(review1Status)
   const phase2Unlocked = review1Status === 'approved' && trainingDone
   const review2Frozen = ['sent', 'in_review', 'validated', 'approved'].includes(review2Status)
+
+  const validFiles = useMemo(
+    () => files.filter((file) => file.status === 'uploaded'),
+    [files],
+  )
 
   const review1Ready = useMemo(
     () => REVIEW1_DOCS.every((doc) => validFiles.some((file) => file.category === doc.category)),
@@ -152,6 +183,17 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
   const firstPendingKey = REVIEW1_DOCS.find(
     (doc) => !validFiles.some((file) => file.category === doc.category),
   )?.key
+
+  useEffect(() => {
+    if (!focusDoc) return
+    const timer = window.setTimeout(() => {
+      document.getElementById(`doc-${focusDoc}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [focusDoc, profile])
 
   async function handleSubmitReview1() {
     setError('')
@@ -216,17 +258,80 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
     document.body.appendChild(link)
     link.click()
     link.remove()
+    if (!profile?.icf12Downloaded) {
+      window.setTimeout(() => setAskIcf12Confirm(true), 400)
+    }
+  }
+
+  async function handleConfirmIcf12Download() {
+    setError('')
+    setSaving(true)
     try {
       const data = await confirmIcf12Download()
       setProfile(data.profile)
       onProfile(data.profile)
-    } catch {
-      /* download still happened */
+      setAskIcf12Confirm(false)
+      setIcf12DonePopup(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo confirmar la descarga.')
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
     <div className="space-y-8">
+      {askIcf12Confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0A165E]/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-level-2">
+            <MaterialIcon name="download" className="text-[48px] text-[#159DBC]" />
+            <p className="mt-3 text-headline-sm font-bold text-[#0A165E]">
+              ¿Descargaste el formato IC.F.1.2?
+            </p>
+            <p className="mt-1 text-body-md text-[#64748b]">
+              Confirma que el archivo se descargó en tu equipo para marcar este paso como completado.
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleConfirmIcf12Download()}
+                className="rounded-lg bg-[#0A165E] px-4 py-2.5 text-label-md font-semibold text-white hover:bg-[#0A165E]/90 disabled:opacity-60"
+              >
+                {saving ? 'Confirmando...' : 'Sí, confirmo la descarga'}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setAskIcf12Confirm(false)}
+                className="rounded-lg px-4 py-2 text-label-md font-semibold text-[#64748b] hover:bg-[#eef3f8]"
+              >
+                Aún no
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {icf12DonePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0A165E]/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-level-2">
+            <MaterialIcon name="check_circle" filled className="text-[48px] text-[#4ECDC4]" />
+            <p className="mt-3 text-headline-sm font-bold text-[#0A165E]">Descarga confirmada</p>
+            <p className="mt-1 text-body-md text-[#64748b]">
+              Completa el Word y súbelo en el siguiente paso. El avance de la etapa 2 ya se actualizó
+              en el dashboard.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIcf12DonePopup(false)}
+              className="mt-5 w-full rounded-lg bg-[#0A165E] px-4 py-2.5 text-label-md font-semibold text-white hover:bg-[#0A165E]/90"
+            >
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
       <section>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <h3 className="text-headline-sm font-bold text-[#0A165E]">
@@ -242,30 +347,72 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
           {REVIEW1_DOCS.map((doc) => {
             const categoryFiles = files.filter((file) => file.category === doc.category)
             const ready = categoryFiles.some((file) => file.status === 'uploaded')
+            const docReview =
+              categoryFiles.find((file) => file.reviewStatus)?.reviewStatus || 'pending'
+            const replaceable = canReplaceCategory(review1Status, docReview)
             return (
               <ReviewTaskCard
                 key={doc.key}
+                cardId={`doc-${doc.category}`}
                 title={doc.title}
                 description={doc.description}
                 icon={doc.icon}
-                status={itemStatus(ready, review1Status)}
-                defaultOpen={firstPendingKey === doc.key}
+                status={itemStatus(ready, review1Status, docReview)}
+                defaultOpen={focusDoc === doc.category || (!focusDoc && firstPendingKey === doc.key)}
               >
-                <UploadZone
-                  compact
-                  title={doc.title}
-                  description={doc.description}
-                  icon="upload_file"
-                  category={doc.category}
-                  required
-                  multiple={doc.multiple}
-                  acceptPdfOnly={doc.acceptPdfOnly}
-                  buttonLabel={doc.multiple ? 'Explorar archivos' : 'Seleccionar archivo'}
-                  buttonVariant="primary"
-                  disabled={review1Locked}
-                  onFiles={addFiles}
+                {replaceable && (
+                  <>
+                    {Array.from({ length: 1 + (extraZones[doc.category] || 0) }).map((_, zoneIndex) => (
+                      <div key={`${doc.category}-zone-${zoneIndex}`} className={zoneIndex > 0 ? 'mt-3' : ''}>
+                        <UploadZone
+                          compact
+                          title={doc.title}
+                          description={
+                            docReview === 'rejected'
+                              ? 'Este documento fue observado. Quítalo y sube una versión corregida.'
+                              : doc.description
+                          }
+                          icon="upload_file"
+                          category={doc.category}
+                          required={zoneIndex === 0}
+                          multiple={false}
+                          acceptPdfOnly={doc.acceptPdfOnly}
+                          buttonLabel="Seleccionar archivo"
+                          buttonVariant="primary"
+                          onFiles={addFiles}
+                          onRemoveZone={
+                            zoneIndex > 0 ? () => removeExtraZone(doc.category) : undefined
+                          }
+                        />
+                      </div>
+                    ))}
+                    {(extraZones[doc.category] || 0) < 4 && (
+                      <button
+                        type="button"
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg border border-dashed border-secondary/50 bg-white px-3 py-2 text-label-md font-semibold text-secondary hover:bg-secondary-container/10"
+                        onClick={() => addExtraZone(doc.category)}
+                      >
+                        <MaterialIcon name="add" className="text-[18px]" />
+                        Añadir otro archivo
+                      </button>
+                    )}
+                  </>
+                )}
+                {!replaceable && docReview === 'approved' && (
+                  <p className="mb-2 text-body-md text-on-surface-variant">
+                    Documento aprobado. Puedes verlo, pero no reemplazarlo.
+                  </p>
+                )}
+                {!replaceable && docReview !== 'approved' && ready && (
+                  <p className="mb-2 text-body-md text-on-surface-variant">
+                    Documento enviado. Puedes verlo; no se puede quitar mientras está en revisión.
+                  </p>
+                )}
+                <FileList
+                  files={categoryFiles}
+                  canRemove={replaceable}
+                  onRemove={removeFile}
                 />
-                <FileList files={categoryFiles} locked={review1Locked} onRemove={removeFile} />
               </ReviewTaskCard>
             )
           })}
@@ -323,20 +470,22 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
             </span>
             <div>
               <p className="text-label-md font-bold text-on-surface">
-                {trainingDone ? 'Video de inducción visto' : 'Mira el video de inducción'}
+                {trainingDone
+                  ? 'Capacitación completada'
+                  : '¿Cómo llenar tu formato IC.F.1.2?'}
               </p>
               <p className="text-body-md text-on-surface-variant">
                 {trainingDone
-                  ? 'Ya completaste la capacitación. La fase 2 se habilita cuando Operaciones apruebe tu documentación.'
+                  ? 'Ya viste el video. La fase 2 se habilita cuando Operaciones apruebe tu documentación.'
                   : trainingUnlocked
-                    ? 'Ve al centro de capacitación, reproduce el video hasta el final y vuelve aquí para continuar.'
+                    ? 'Ve al centro de capacitación, mira el video (puedes adelantarlo) y al terminarlo vuelve aquí para continuar.'
                     : 'Se habilita cuando envíes la documentación de la fase 1.'}
               </p>
             </div>
           </div>
           {trainingUnlocked && (
             <Link
-              to="/dashboard/capacitacion"
+              to="/dashboard/capacitacion?video=icf12"
               className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#159DBC] px-4 py-2.5 text-label-md font-semibold text-white hover:bg-[#159DBC]/90"
             >
               <MaterialIcon name="play_arrow" className="text-[20px]" />
@@ -387,7 +536,7 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
                 : review2Status === 'approved'
                   ? 'approved'
                   : Boolean(profile?.icf12Downloaded)
-                    ? 'ready'
+                    ? 'completed'
                     : 'pending'
             }
             defaultOpen={phase2Unlocked && review2Status !== 'approved'}
@@ -425,11 +574,14 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
             title="Subir formato IC.F.1.2 completado"
             description="Adjunta el formato Word diligenciado (DOCX o PDF)."
             icon="upload_file"
+            cardId="doc-icf12"
             status={itemStatus(
               icf12Ready,
               phase2Unlocked ? review2Status : 'pending',
+              files.find((file) => file.category === 'icf12')?.reviewStatus || 'pending',
               !phase2Unlocked,
             )}
+            defaultOpen={focusDoc === 'icf12' || (phase2Unlocked && review2Status !== 'approved')}
           >
             {!phase2Unlocked ? (
               <p className="text-body-md text-on-surface-variant">
@@ -437,19 +589,45 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
               </p>
             ) : (
               <>
-                <UploadZone
-                  compact
-                  icon="upload_file"
-                  category="icf12"
-                  required
-                  buttonLabel="Seleccionar archivo"
-                  buttonVariant="primary"
-                  disabled={review2Frozen}
-                  onFiles={addFiles}
-                />
+                {canReplaceCategory(
+                  review2Status,
+                  files.find((file) => file.category === 'icf12')?.reviewStatus || 'pending',
+                ) && (
+                  <>
+                    {Array.from({ length: 1 + (extraZones.icf12 || 0) }).map((_, zoneIndex) => (
+                      <div key={`icf12-zone-${zoneIndex}`} className={zoneIndex > 0 ? 'mt-3' : ''}>
+                        <UploadZone
+                          compact
+                          icon="upload_file"
+                          category="icf12"
+                          required={zoneIndex === 0}
+                          buttonLabel="Seleccionar archivo"
+                          buttonVariant="primary"
+                          onFiles={addFiles}
+                          onRemoveZone={
+                            zoneIndex > 0 ? () => removeExtraZone('icf12') : undefined
+                          }
+                        />
+                      </div>
+                    ))}
+                    {(extraZones.icf12 || 0) < 4 && (
+                      <button
+                        type="button"
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg border border-dashed border-secondary/50 bg-white px-3 py-2 text-label-md font-semibold text-secondary hover:bg-secondary-container/10"
+                        onClick={() => addExtraZone('icf12')}
+                      >
+                        <MaterialIcon name="add" className="text-[18px]" />
+                        Añadir otro archivo
+                      </button>
+                    )}
+                  </>
+                )}
                 <FileList
                   files={files.filter((file) => file.category === 'icf12')}
-                  locked={review2Frozen}
+                  canRemove={canReplaceCategory(
+                    review2Status,
+                    files.find((file) => file.category === 'icf12')?.reviewStatus || 'pending',
+                  )}
                   onRemove={removeFile}
                 />
               </>
@@ -503,14 +681,27 @@ export function RegistrationPhases({ setUser, onProfile }: RegistrationPhasesPro
 
 function FileList({
   files,
-  locked,
+  canRemove,
   onRemove,
 }: {
   files: UploadedFile[]
-  locked: boolean
+  canRemove: boolean
   onRemove: (id: string) => void
 }) {
   if (!files.length) return null
+
+  async function openFile(file: UploadedFile) {
+    if (!file.documentId) return
+    try {
+      const result = await fetchDocumentFile(file.documentId, true)
+      const url = URL.createObjectURL(result.blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="mt-3 space-y-2">
       {files.map((file) => (
@@ -518,25 +709,32 @@ function FileList({
           key={file.id}
           className="flex items-center justify-between gap-3 rounded-xl border border-outline-variant/40 bg-white px-3 py-2.5"
         >
-          <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            onClick={() => void openFile(file)}
+            disabled={!file.documentId || file.status !== 'uploaded'}
+          >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-error-container/20 text-error">
               <MaterialIcon
                 name={file.name.toLowerCase().endsWith('.pdf') ? 'picture_as_pdf' : 'draft'}
               />
             </span>
             <div className="min-w-0">
-              <p className="truncate text-label-md font-semibold text-on-surface">{file.name}</p>
+              <p className="truncate text-label-md font-semibold text-on-surface underline-offset-2 hover:underline">
+                {file.name}
+              </p>
               <p className="text-label-sm text-on-surface-variant">
                 {formatFileSize(file.size)}
                 {file.status === 'uploading'
                   ? ' · Subiendo...'
                   : file.status === 'error'
                     ? ` · ${file.error}`
-                    : ' · Guardado'}
+                    : ' · Guardado · Ver archivo'}
               </p>
             </div>
-          </div>
-          {!locked && (
+          </button>
+          {canRemove && (
             <button
               type="button"
               className="rounded-full p-1.5 text-on-surface-variant hover:bg-error-container/40 hover:text-error"

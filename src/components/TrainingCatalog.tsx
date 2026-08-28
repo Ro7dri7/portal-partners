@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MaterialIcon } from './MaterialIcon'
 import VideoPlayer from './VideoPlayer'
 
@@ -13,10 +13,15 @@ export type TrainingItem = {
   durationSeconds: number
   image: string
   action: 'play' | 'download'
+  videoSrc?: string
+  tracksCompletion?: boolean
 }
 
 type TrainingCatalogProps = {
   items: TrainingItem[]
+  autoOpenId?: string | null
+  completedIds?: string[]
+  onTrackedVideoComplete?: (id: string) => void
 }
 
 const FILTERS = [
@@ -32,9 +37,18 @@ const TAG_CLASS: Record<TrainingItem['tagTone'], string> = {
   admin: 'bg-primary/10 text-primary',
 }
 
-export default function TrainingCatalog({ items }: TrainingCatalogProps) {
+export default function TrainingCatalog({
+  items,
+  autoOpenId = null,
+  completedIds = [],
+  onTrackedVideoComplete,
+}: TrainingCatalogProps) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('todos')
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(autoOpenId)
+
+  useEffect(() => {
+    if (autoOpenId) setActiveId(autoOpenId)
+  }, [autoOpenId])
 
   const visible = useMemo(
     () => (filter === 'todos' ? items : items.filter((item) => item.area === filter)),
@@ -70,7 +84,10 @@ export default function TrainingCatalog({ items }: TrainingCatalogProps) {
       </section>
 
       {active && (
-        <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-lg shadow-level-1">
+        <section
+          id="training-player"
+          className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-lg shadow-level-1"
+        >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-headline-sm font-semibold text-primary">{active.title}</h3>
             <button
@@ -82,7 +99,17 @@ export default function TrainingCatalog({ items }: TrainingCatalogProps) {
               <MaterialIcon name="close" />
             </button>
           </div>
-          <VideoPlayer title={active.title} durationSeconds={active.durationSeconds} />
+          {active.videoSrc ? (
+            <TrackedVideo
+              key={active.id}
+              src={active.videoSrc}
+              poster={active.image}
+              tracksCompletion={Boolean(active.tracksCompletion)}
+              onComplete={() => onTrackedVideoComplete?.(active.id)}
+            />
+          ) : (
+            <VideoPlayer title={active.title} durationSeconds={active.durationSeconds} />
+          )}
         </section>
       )}
 
@@ -92,6 +119,7 @@ export default function TrainingCatalog({ items }: TrainingCatalogProps) {
           iconWrap="bg-primary/5 text-primary"
           title="Área de Operaciones"
           items={operaciones}
+          completedIds={completedIds}
           onPlay={setActiveId}
         />
       )}
@@ -106,10 +134,54 @@ export default function TrainingCatalog({ items }: TrainingCatalogProps) {
           iconWrap="bg-secondary/10 text-secondary"
           title="Área Comercial"
           items={comercial}
+          completedIds={completedIds}
           onPlay={setActiveId}
         />
       )}
     </div>
+  )
+}
+
+function isNearEnd(video: HTMLVideoElement) {
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return false
+  return video.currentTime >= video.duration - 0.4
+}
+
+function TrackedVideo({
+  src,
+  poster,
+  tracksCompletion,
+  onComplete,
+}: {
+  src: string
+  poster?: string
+  tracksCompletion: boolean
+  onComplete: () => void
+}) {
+  const doneRef = useRef(false)
+
+  function markDone() {
+    if (!tracksCompletion || doneRef.current) return
+    doneRef.current = true
+    onComplete()
+  }
+
+  return (
+    <video
+      className="max-h-[420px] w-full rounded-lg bg-black object-contain"
+      controls
+      playsInline
+      poster={poster}
+      onEnded={markDone}
+      onSeeked={(event) => {
+        if (isNearEnd(event.currentTarget)) markDone()
+      }}
+      onTimeUpdate={(event) => {
+        if (isNearEnd(event.currentTarget)) markDone()
+      }}
+    >
+      <source src={src} type="video/mp4" />
+    </video>
   )
 }
 
@@ -118,12 +190,14 @@ function Section({
   iconWrap,
   title,
   items,
+  completedIds,
   onPlay,
 }: {
   icon: string
   iconWrap: string
   title: string
   items: TrainingItem[]
+  completedIds: string[]
   onPlay: (id: string) => void
 }) {
   return (
@@ -138,6 +212,7 @@ function Section({
         {items.map((item) => (
           <article
             key={item.id}
+            id={`training-${item.id}`}
             className="group flex flex-col overflow-hidden rounded-xl border border-outline-variant/30 bg-surface shadow-[0_2px_4px_rgba(0,0,0,0.05)] transition-shadow hover:shadow-md"
           >
             <div className="relative flex h-28 items-center justify-center overflow-hidden bg-surface-container">
@@ -154,9 +229,17 @@ function Section({
               >
                 <MaterialIcon name="play_arrow" filled />
               </button>
-              <span className="absolute bottom-2 right-2 rounded bg-inverse-surface/80 px-2 py-1 text-xs font-semibold text-inverse-on-surface backdrop-blur-sm">
-                {item.duration}
-              </span>
+              {item.duration ? (
+                <span className="absolute bottom-2 right-2 rounded bg-inverse-surface/80 px-2 py-1 text-xs font-semibold text-inverse-on-surface backdrop-blur-sm">
+                  {item.duration}
+                </span>
+              ) : null}
+              {completedIds.includes(item.id) && (
+                <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-[#146c43]/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                  <MaterialIcon name="check" className="text-[14px]" />
+                  Completado
+                </span>
+              )}
             </div>
             <div className="flex flex-1 flex-col p-3">
               <div className="mb-1.5 flex items-center gap-2">

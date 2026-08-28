@@ -137,7 +137,7 @@ async function notifyHelpdeskPartnerAuditor({
     portal_application_id: String(application.id),
     partner: partnerPayload,
     documents: docsPayload,
-    title: `PARTNER AUDITOR — FASE ${stage} — ${partner.first_name || ''} ${partner.last_name || ''}`.trim(),
+    title: `Partner Auditor · Fase ${stage} · ${[partner.first_name, partner.last_name].filter(Boolean).join(' ')}`.trim(),
     tags: `portal_partners,partner_auditor,fase_${stage}`,
   }
   try {
@@ -325,6 +325,13 @@ function publicProfile(row, partner) {
       contractDownloaded: false,
       trainingCompleted: false,
       icf12Downloaded: false,
+      commercialContractStatus: 'pending',
+      commercialContractSubmitted: false,
+      whatsappGroupUrl: '',
+      whatsappConfirmed: false,
+      auditReportTrainingCompleted: false,
+      casaMatrizDownloaded: false,
+      commercialTrainingCompleted: false,
     }
   }
   return {
@@ -352,6 +359,30 @@ function publicProfile(row, partner) {
     contractDownloaded: Boolean(row.contract_downloaded_at),
     trainingCompleted: Boolean(row.training_completed_at),
     icf12Downloaded: Boolean(row.icf12_downloaded_at),
+    commercialContractStatus: row.commercial_contract_status || 'pending',
+    commercialContractSubmitted: Boolean(row.commercial_contract_submitted_at),
+    whatsappGroupUrl: row.whatsapp_group_url || '',
+    whatsappConfirmed: Boolean(row.whatsapp_confirmed_at),
+    auditReportTrainingCompleted: Boolean(row.audit_report_training_at),
+    casaMatrizDownloaded: Boolean(row.casa_matriz_downloaded_at),
+    commercialTrainingCompleted: Boolean(row.commercial_training_at),
+  }
+}
+
+function normalizeWhatsAppUrl(value) {
+  let url = String(value || '').trim()
+  if (!url) return ''
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./i, '').toLowerCase()
+    if (!['chat.whatsapp.com', 'wa.me', 'api.whatsapp.com', 'whatsapp.com'].includes(host)) {
+      return ''
+    }
+    parsed.protocol = 'https:'
+    return parsed.toString()
+  } catch {
+    return ''
   }
 }
 
@@ -390,19 +421,30 @@ const PORTAL_REVIEW_STATUSES = new Set([
   'approved',
   'rejected',
   'locked',
+  'ceo_signed',
 ])
 
 const DOC_SLOT_LABELS = {
   cv_documentado: 'CV documentado y actualizado',
-  diploma_estudio: 'Diploma estudio técnico o universitario',
+  diploma_estudio: 'Diploma de estudio técnico o universitario',
   certificados_auditor_lider: 'Certificados de curso de Auditor Líder',
   relacion_auditorias: 'Relación de auditorías realizadas como Auditor Líder',
   formato_ic_f_1_2: 'Formato IC.F.1.2',
   cv: 'CV documentado y actualizado',
-  degree: 'Diploma estudio técnico o universitario',
+  degree: 'Diploma de estudio técnico o universitario',
   lead_auditor_courses: 'Certificados de curso de Auditor Líder',
   audits_relation: 'Relación de auditorías realizadas como Auditor Líder',
   icf12: 'Formato IC.F.1.2',
+  contrato_firmado: 'Contrato comercial firmado',
+  commercial_contract: 'Contrato comercial firmado',
+  firma_ceo: 'Firma CEO',
+  advisor_rates: 'Tarifas de asesor',
+  casa_matriz_contract: 'Contrato oficial CASA MATRIZ',
+  identity: 'Documento de identidad',
+  background: 'Antecedentes',
+  data_treatment: 'Tratamiento de datos',
+  experience: 'Experiencia',
+  certificates: 'Certificados',
 }
 
 function labelDocSlot(key) {
@@ -461,7 +503,14 @@ function publicComment(row) {
     deadlineDurationLabel: row.deadline_duration_label || legacy.deadlineDurationLabel,
     deadlineLabel: hasStructuredDeadline ? null : legacy.deadlineLabel,
     createdAt: row.created_at,
+    track: row.track || 'auditor',
   }
+}
+
+function normalizeCommentTrack(value) {
+  const raw = String(value || '').trim()
+  if (raw === 'commercial' || raw === 'fase_2' || raw === 'fase_1') return raw
+  return 'auditor'
 }
 
 async function createPartnerNotification(partnerId, { title, body, link }) {
@@ -678,7 +727,8 @@ async function migrate() {
       CHECK (category IN (
         'cv', 'experience', 'certification', 'certificates',
         'identity', 'background', 'degree', 'lead_auditor_courses', 'data_treatment',
-        'audits_relation', 'icf12'
+        'audits_relation', 'icf12', 'commercial_contract', 'ceo_signature',
+        'advisor_rates', 'casa_matriz_contract'
       ))
   `)
   await getPool().query(`
@@ -721,6 +771,13 @@ async function migrate() {
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS contract_downloaded_at TIMESTAMPTZ;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS training_completed_at TIMESTAMPTZ;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS icf12_downloaded_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS commercial_contract_status TEXT NOT NULL DEFAULT 'pending';
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS commercial_contract_submitted_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS whatsapp_group_url TEXT;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS whatsapp_confirmed_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS audit_report_training_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS casa_matriz_downloaded_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS commercial_training_at TIMESTAMPTZ;
   `)
   await getPool().query(`
     UPDATE partner_profiles
@@ -773,6 +830,7 @@ async function migrate() {
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS referenced_docs JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ;
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_duration_label TEXT;
+    ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS track TEXT NOT NULL DEFAULT 'auditor';
   `)
 
   await getPool().query(`
@@ -844,16 +902,18 @@ const DOCUMENT_CATEGORIES = new Set([
   'data_treatment',
   'audits_relation',
   'icf12',
+  'commercial_contract',
+  'advisor_rates',
+  'casa_matriz_contract',
 ])
 const SINGLE_DOCUMENT_CATEGORIES = new Set([
-  'cv',
   'identity',
   'background',
-  'degree',
   'data_treatment',
-  'audits_relation',
-  'icf12',
+  'commercial_contract',
+  'casa_matriz_contract',
 ])
+const STAGE5_DOC_CATEGORIES = new Set(['advisor_rates', 'casa_matriz_contract'])
 const REVIEW1_DOC_CATEGORIES = ['cv', 'degree', 'lead_auditor_courses', 'audits_relation']
 const PDF_ONLY_CATEGORIES = new Set(['cv', 'data_treatment', 'audits_relation'])
 
@@ -1078,9 +1138,22 @@ export function createApi() {
         res.status(400).json({ error: 'Categoría de documento no válida.' })
         return
       }
-      if (!isAllowedExtension(req.file.originalname)) {
+      const commercialExts = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']
+      const allowedForCategory =
+        category === 'commercial_contract' ||
+        category === 'ceo_signature' ||
+        STAGE5_DOC_CATEGORIES.has(category)
+          ? commercialExts.includes(fileExtension(req.file.originalname))
+          : isAllowedExtension(req.file.originalname)
+      if (!allowedForCategory) {
+        const allowed =
+          category === 'commercial_contract' ||
+          category === 'ceo_signature' ||
+          STAGE5_DOC_CATEGORIES.has(category)
+            ? commercialExts.join(', ')
+            : r2Config().allowedExtensions.join(', ')
         res.status(400).json({
-          error: `Extensión no permitida. Usa: ${r2Config().allowedExtensions.join(', ')}.`,
+          error: `Extensión no permitida. Usa: ${allowed}.`,
         })
         return
       }
@@ -1107,6 +1180,23 @@ export function createApi() {
       if (category === 'icf12' && reviewFrozen(reviews.review2Status)) {
         res.status(403).json({ error: 'La revisión 2 ya fue enviada y no se puede modificar.' })
         return
+      }
+      if (STAGE5_DOC_CATEGORIES.has(category)) {
+        const { rows: stage5 } = await getPool().query(
+          `SELECT whatsapp_confirmed_at, casa_matriz_downloaded_at
+           FROM partner_profiles WHERE partner_id = $1`,
+          [req.partner.id],
+        )
+        if (!stage5[0]?.whatsapp_confirmed_at) {
+          res.status(403).json({ error: 'Completa la etapa 4 para habilitar estas actividades.' })
+          return
+        }
+        if (category === 'casa_matriz_contract' && !stage5[0]?.casa_matriz_downloaded_at) {
+          res.status(403).json({
+            error: 'Descarga el contrato oficial CASA MATRIZ antes de subirlo firmado.',
+          })
+          return
+        }
       }
 
       if (SINGLE_DOCUMENT_CATEGORIES.has(category)) {
@@ -1155,6 +1245,11 @@ export function createApi() {
       res.status(201).json({ document: rows[0] })
     } catch (error) {
       console.error(error)
+      const code = error?.code || error?.cause?.code
+      if (code === '23514') {
+        res.status(400).json({ error: 'Esta categoría de documento aún no está habilitada en la base.' })
+        return
+      }
       res.status(500).json({ error: 'No se pudo subir el archivo a Cloudflare R2.' })
     } finally {
       if (tempPath) {
@@ -1285,7 +1380,7 @@ export function createApi() {
     const { rows: comments } = appRows[0]
       ? await getPool().query(
           `SELECT id, author_role, author_name, body, referenced_docs, deadline_at,
-                  deadline_duration_label, created_at
+                  deadline_duration_label, created_at, COALESCE(track, 'auditor') AS track
            FROM application_comments WHERE application_id = $1
            ORDER BY created_at ASC`,
           [appRows[0].id],
@@ -1307,7 +1402,10 @@ export function createApi() {
             createdAt: appRows[0].created_at,
           }
         : null,
-      comments: comments.map(publicComment),
+      comments: comments.map(publicComment).filter((item) => item.track !== 'commercial'),
+      commercialComments: comments
+        .map(publicComment)
+        .filter((item) => item.track === 'commercial'),
     })
   })
 
@@ -1430,7 +1528,7 @@ export function createApi() {
       [
         req.partner.id,
         'Capacitación completada',
-        'Viste el video de inducción. Ya puedes continuar con la fase 2 cuando la documentación esté aprobada.',
+        'Completaste el video “¿Cómo llenar tu formato IC.F.1.2?”. Ya puedes continuar con la fase 2 cuando la documentación esté aprobada.',
         '/dashboard/perfil',
       ],
     )
@@ -1446,6 +1544,57 @@ export function createApi() {
     const { rows } = await getPool().query(
       `UPDATE partner_profiles
        SET icf12_downloaded_at = COALESCE(icf12_downloaded_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
+  app.post('/api/profile/stage5/training', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET audit_report_training_at = COALESCE(audit_report_training_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
+  app.post('/api/profile/stage5/casa-matriz-download', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET casa_matriz_downloaded_at = COALESCE(casa_matriz_downloaded_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
+  app.post('/api/profile/stage6/training', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET commercial_training_at = COALESCE(commercial_training_at, now()),
            updated_at = now()
        WHERE partner_id = $1
        RETURNING *`,
@@ -1871,6 +2020,97 @@ export function createApi() {
     })
   })
 
+  app.post('/api/profile/commercial-contract/submit', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Este envío no está disponible para este rol.' })
+      return
+    }
+    const { rows: storedDocs } = await getPool().query(
+      `SELECT category FROM documents
+       WHERE partner_id = $1 AND category = 'commercial_contract' AND storage_key IS NOT NULL`,
+      [req.partner.id],
+    )
+    if (!storedDocs[0]) {
+      res.status(400).json({ error: 'Sube el contrato firmado antes de enviarlo.' })
+      return
+    }
+    const { rows: reviewRows } = await getPool().query(
+      'SELECT review2_status FROM partner_profiles WHERE partner_id = $1',
+      [req.partner.id],
+    )
+    const review2 = reviewRows[0]?.review2_status || 'locked'
+    if (!['sent', 'in_review', 'validated', 'approved'].includes(review2)) {
+      res.status(403).json({
+        error: 'Envía la validación de Partner Auditor (fase 2) antes del contrato comercial.',
+      })
+      return
+    }
+    await getPool().query(
+      `UPDATE partner_profiles
+       SET commercial_contract_status = 'sent',
+           commercial_contract_submitted_at = COALESCE(commercial_contract_submitted_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1`,
+      [req.partner.id],
+    )
+    const application = await ensureApplication(
+      req.partner.id,
+      'Recibimos tu contrato comercial firmado. El equipo comercial lo revisará.',
+    )
+    const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
+      req.partner.id,
+    ])
+    const { rows: profileRows } = await getPool().query(
+      'SELECT * FROM partner_profiles WHERE partner_id = $1',
+      [req.partner.id],
+    )
+    const { rows: docRows } = await getPool().query(
+      `SELECT category, file_name, file_size, storage_key, mime_type
+       FROM documents
+       WHERE partner_id = $1 AND category = 'commercial_contract' AND storage_key IS NOT NULL
+       ORDER BY created_at DESC`,
+      [req.partner.id],
+    )
+    await notifyHelpdeskPartnerAuditor({
+      stage: 3,
+      application,
+      partner: partnerRows[0],
+      profile: profileRows[0],
+      documents: docRows,
+    })
+    res.json({
+      user: publicUser(partnerRows[0]),
+      profile: publicProfile(profileRows[0], partnerRows[0]),
+      publicCode: application.public_code,
+    })
+  })
+
+  app.post('/api/profile/whatsapp/confirm', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta acción no está disponible para este rol.' })
+      return
+    }
+    const { rows: profileRows } = await getPool().query(
+      'SELECT * FROM partner_profiles WHERE partner_id = $1',
+      [req.partner.id],
+    )
+    if (!profileRows[0]?.whatsapp_group_url) {
+      res.status(400).json({
+        error: 'Aún no hay un link de WhatsApp. Espera a tu coordinador comercial.',
+      })
+      return
+    }
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET whatsapp_confirmed_at = COALESCE(whatsapp_confirmed_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner) })
+  })
+
   app.get('/api/admin/documents/download', async (req, res) => {
     if (req.headers['x-admin-token'] !== adminToken()) {
       res.status(401).json({ error: 'No autorizado.' })
@@ -1933,14 +2173,15 @@ export function createApi() {
       res.status(404).json({ error: 'Solicitud no encontrada.' })
       return
     }
+    const track = normalizeCommentTrack(req.body?.track)
     const { rows } = await getPool().query(
       `INSERT INTO application_comments (
          application_id, author_role, author_name, body,
-         referenced_docs, deadline_at, deadline_duration_label
+         referenced_docs, deadline_at, deadline_duration_label, track
        )
-       VALUES ($1, 'coordinator', $2, $3, $4::jsonb, $5, $6)
+       VALUES ($1, 'coordinator', $2, $3, $4::jsonb, $5, $6, $7)
        RETURNING id, author_role, author_name, body, referenced_docs, deadline_at,
-                 deadline_duration_label, created_at`,
+                 deadline_duration_label, created_at, COALESCE(track, 'auditor') AS track`,
       [
         appRows[0].id,
         authorName,
@@ -1948,6 +2189,7 @@ export function createApi() {
         JSON.stringify(referencedDocs),
         deadlineAt || null,
         deadlineDurationLabel,
+        track,
       ],
     )
     const who = authorEmail ? `${authorName} (${authorEmail})` : authorName
@@ -1963,7 +2205,7 @@ export function createApi() {
       )
     }
     await createPartnerNotification(appRows[0].partner_id, {
-      title: 'Nuevo mensaje de Operaciones',
+      title: track === 'commercial' ? 'Nuevo mensaje de Comercial' : 'Nuevo mensaje de Operaciones',
       body: notifBits.length
         ? `${who} comentó en tu solicitud ${appRows[0].public_code}: ${notifBits.join(' · ')}`
         : `${who} te envió un comentario sobre tu solicitud ${appRows[0].public_code}.`,
@@ -2067,12 +2309,41 @@ export function createApi() {
     res.json({ reviews: rows })
   })
 
+  app.post('/api/admin/partners/:partnerId/whatsapp', async (req, res) => {
+    if (req.headers['x-admin-token'] !== adminToken()) {
+      res.status(401).json({ error: 'No autorizado.' })
+      return
+    }
+    const partnerId = req.params.partnerId
+    const raw = req.body?.url
+    const url = raw == null || String(raw).trim() === '' ? '' : normalizeWhatsAppUrl(raw)
+    if (String(raw || '').trim() && !url) {
+      res.status(400).json({ error: 'El link debe ser de un grupo o chat de WhatsApp.' })
+      return
+    }
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET whatsapp_group_url = $1,
+           whatsapp_confirmed_at = NULL,
+           updated_at = now()
+       WHERE partner_id = $2
+       RETURNING *`,
+      [url || null, partnerId],
+    )
+    if (!rows[0]) {
+      res.status(404).json({ error: 'Perfil no encontrado.' })
+      return
+    }
+    res.json({ profile: publicProfile(rows[0]) })
+  })
+
   app.post('/api/admin/document-reviews/:partnerId/review', async (req, res) => {
     if (req.headers['x-admin-token'] !== adminToken()) {
       res.status(401).json({ error: 'No autorizado.' })
       return
     }
-    const stage = Number(req.body?.stage) === 2 ? 2 : 1
+    const stageNum = Number(req.body?.stage)
+    const stage = stageNum === 3 ? 3 : stageNum === 2 ? 2 : 1
     const rawStatus = String(req.body?.status || '').trim()
     const statusAlias = {
       approved: 'approved',
@@ -2081,6 +2352,7 @@ export function createApi() {
       in_review: 'in_review',
       validated: 'validated',
       pending: 'pending',
+      ceo_signed: 'ceo_signed',
     }
     const status = statusAlias[rawStatus]
     if (!status || !PORTAL_REVIEW_STATUSES.has(status) || status === 'locked') {
@@ -2129,6 +2401,18 @@ export function createApi() {
          WHERE partner_id = $2`,
         [status, partnerId],
       )
+    } else if (stage === 3) {
+      const current = profileRows[0].commercial_contract_status || 'pending'
+      if (current === 'pending' || current === 'locked') {
+        res.status(400).json({ error: 'El contrato comercial aún no fue enviado por el partner.' })
+        return
+      }
+      await getPool().query(
+        `UPDATE partner_profiles
+         SET commercial_contract_status = $1, updated_at = now()
+         WHERE partner_id = $2`,
+        [status, partnerId],
+      )
     } else {
       if (profileRows[0].review1_status !== 'approved') {
         res.status(400).json({
@@ -2152,10 +2436,16 @@ export function createApi() {
       )
     }
 
-    const previousStatus = stage === 1 ? profileRows[0].review1_status : profileRows[0].review2_status
+    const previousStatus =
+      stage === 1
+        ? profileRows[0].review1_status
+        : stage === 3
+          ? profileRows[0].commercial_contract_status
+          : profileRows[0].review2_status
     const statusChanged = previousStatus !== status
 
-    const stageCategories = stage === 2 ? ['icf12'] : REVIEW1_DOC_CATEGORIES
+    const stageCategories =
+      stage === 3 ? ['commercial_contract'] : stage === 2 ? ['icf12'] : REVIEW1_DOC_CATEGORIES
     for (const item of docsPayload) {
       const category = String(item?.category || '').trim()
       const mappedReview = reviewAlias[String(item?.reviewStatus || item?.review_status || '').trim().toLowerCase()]
@@ -2247,6 +2537,7 @@ export function createApi() {
       return
     }
     const text = String(req.body?.text || '').trim()
+    const track = normalizeCommentTrack(req.body?.track)
     if (!text) {
       res.status(400).json({ error: 'Escribe un comentario.' })
       return
@@ -2261,14 +2552,19 @@ export function createApi() {
     }
     const name = `${req.partner.first_name} ${req.partner.last_name}`.trim() || 'Partner'
     const { rows } = await getPool().query(
-      `INSERT INTO application_comments (application_id, author_role, author_name, body)
-       VALUES ($1, 'applicant', $2, $3)
+      `INSERT INTO application_comments (application_id, author_role, author_name, body, track)
+       VALUES ($1, 'applicant', $2, $3, $4)
        RETURNING id, author_role, author_name, body, referenced_docs, deadline_at,
-                 deadline_duration_label, created_at`,
-      [appRows[0].id, name, text],
+                 deadline_duration_label, created_at, COALESCE(track, 'auditor') AS track`,
+      [appRows[0].id, name, text, track],
     )
     await notifyHelpdeskPartnerComment({
-      publicCode: appRows[0].public_code,
+      publicCode:
+        track === 'commercial'
+          ? `${appRows[0].public_code}-CONTRATO`
+          : track === 'fase_2'
+            ? `${appRows[0].public_code}-F2`
+            : appRows[0].public_code,
       author: name,
       text,
     })

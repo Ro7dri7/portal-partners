@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useOutletContext } from '../app-router'
 import { confirmStage1Contract, fetchProfile, type ProfessionalProfile } from '../api'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { RegistrationPhases } from '../components/RegistrationPhases'
-import { JOURNEY_STAGES } from '../utils/auditorProgress'
+import { CommercialContractPanel } from '../components/CommercialContractPanel'
+import { WhatsAppConnectPanel } from '../components/WhatsAppConnectPanel'
+import { TechnicalStagePanel } from '../components/TechnicalStagePanel'
+import { getAuditorProgress, JOURNEY_STAGES } from '../utils/auditorProgress'
 import type { PartnerUser } from '../constants'
 
 type DashboardContext = {
@@ -17,13 +20,31 @@ export function ProfilePage() {
   const { user, setUser } = useOutletContext<DashboardContext>()
   const navigate = useNavigate()
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
-  const [openKey, setOpenKey] = useState('account')
+  const [documents, setDocuments] = useState<Array<{ category: string }>>([])
+  const [openKey, setOpenKey] = useState(() => {
+    const params = new URLSearchParams(
+      typeof window === 'undefined' ? '' : window.location.search,
+    )
+    const etapa = params.get('etapa')
+    if (params.get('doc') || etapa === 'profile' || etapa === '2') return 'profile'
+    if (etapa === 'documents' || etapa === '3') return 'documents'
+    if (etapa === 'review1' || etapa === 'conectados' || etapa === '4') return 'review1'
+    if (etapa === 'icf12' || etapa === '5' || etapa === 'tecnica') return 'icf12'
+    if (etapa === 'approved' || etapa === '6' || etapa === 'comercial') return 'approved'
+    return 'account'
+  })
   const [saving, setSaving] = useState(false)
   const [askConfirm, setAskConfirm] = useState(false)
   const [donePopup, setDonePopup] = useState(false)
   const [error, setError] = useState('')
   const isAuditor = user.role === 'partner_auditor'
+  const query = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
+  const focusDoc = query.get('doc') || ''
   const stage1Done = Boolean(profile?.contractDownloaded)
+  const progress = useMemo(
+    () => (profile ? getAuditorProgress(profile, documents) : null),
+    [profile, documents],
+  )
   const handleProfile = useCallback((next: ProfessionalProfile) => {
     setProfile(next)
   }, [])
@@ -34,8 +55,24 @@ export function ProfilePage() {
     fetchProfile()
       .then((data) => {
         setProfile(data.profile)
+        setDocuments(data.documents || [])
         if (etapa === 'account' || etapa === '1') setOpenKey('account')
-        else if (etapa === 'profile' || etapa === '2' || data.profile.contractDownloaded) {
+        else if (etapa === 'documents' || etapa === '3') setOpenKey('documents')
+        else if (etapa === 'review1' || etapa === 'conectados' || etapa === '4') {
+          setOpenKey('review1')
+        }
+        else if (etapa === 'icf12' || etapa === '5' || etapa === 'tecnica') {
+          setOpenKey('icf12')
+        }
+        else if (etapa === 'approved' || etapa === '6' || etapa === 'comercial') {
+          setOpenKey('approved')
+        }
+        else if (
+          etapa === 'profile' ||
+          etapa === '2' ||
+          Boolean(query.get('doc')) ||
+          data.profile.contractDownloaded
+        ) {
           setOpenKey('profile')
         }
       })
@@ -164,8 +201,12 @@ export function ProfilePage() {
 
       <div className="space-y-3">
         {JOURNEY_STAGES.map((stage, index) => {
-          const unlocked = index === 0 || stage1Done
-          const done = index === 0 && stage1Done
+          const step = progress?.journey[index]
+          const done = Boolean(step?.state === 'done')
+          const unlocked =
+            index === 0 ||
+            (stage1Done && index <= 3) ||
+            Boolean(step && step.state !== 'locked')
           const open = openKey === stage.key && unlocked
           return (
             <section
@@ -190,7 +231,11 @@ export function ProfilePage() {
                       color: done || unlocked ? '#fff' : '#e5e7eb',
                     }}
                   >
-                    {index + 1}
+                    {done ? (
+                      <MaterialIcon name="check" filled className="text-[22px]" />
+                    ) : (
+                      index + 1
+                    )}
                   </span>
                   <span>
                     <span
@@ -231,7 +276,31 @@ export function ProfilePage() {
                         </button>
                       </>
                     ) : stage.key === 'profile' ? (
-                      <RegistrationPhases setUser={setUser} onProfile={handleProfile} />
+                      <RegistrationPhases
+                        setUser={setUser}
+                        onProfile={handleProfile}
+                        focusDoc={focusDoc}
+                      />
+                    ) : stage.key === 'documents' ? (
+                      <CommercialContractPanel onProfile={handleProfile} />
+                    ) : stage.key === 'review1' ? (
+                      <WhatsAppConnectPanel profile={profile} onProfile={handleProfile} />
+                    ) : stage.key === 'icf12' ? (
+                      <TechnicalStagePanel profile={profile} onProfile={handleProfile} />
+                    ) : stage.key === 'approved' ? (
+                      <div className="space-y-3">
+                        <p className="text-body-md text-[#64748b]">
+                          Mira el video de capacitación comercial. Al terminarlo, esta etapa queda
+                          completada.
+                        </p>
+                        <a
+                          href="/dashboard/capacitacion?video=commercial"
+                          className="inline-flex items-center gap-2 rounded-lg bg-[#0A165E] px-4 py-2.5 text-label-md font-semibold text-white hover:bg-[#0A165E]/90"
+                        >
+                          <MaterialIcon name="play_arrow" filled className="text-[20px]" />
+                          Ver capacitación comercial
+                        </a>
+                      </div>
                     ) : (
                       <p className="text-body-md text-[#64748b]">
                         Este apartado se habilitará cuando completes las etapas anteriores.

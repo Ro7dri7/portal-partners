@@ -143,6 +143,13 @@ export type ProfessionalProfile = {
   contractDownloaded: boolean
   trainingCompleted: boolean
   icf12Downloaded: boolean
+  commercialContractStatus: ReviewStatus | 'ceo_signed' | 'pending'
+  commercialContractSubmitted: boolean
+  whatsappGroupUrl: string
+  whatsappConfirmed: boolean
+  auditReportTrainingCompleted: boolean
+  casaMatrizDownloaded: boolean
+  commercialTrainingCompleted: boolean
 }
 
 export type ReviewStatus =
@@ -171,12 +178,13 @@ export type StatusComment = {
   authorRole: 'coordinator' | 'applicant'
   authorName: string
   body: string
-  createdAt: string
   referencedDocs?: string[]
   referencedDocLabels?: string[]
   deadlineAt?: string | null
   deadlineDurationLabel?: string | null
   deadlineLabel?: string | null
+  createdAt: string
+  track?: 'auditor' | 'commercial' | 'fase_1' | 'fase_2'
 }
 
 export type PartnerNotification = {
@@ -203,15 +211,19 @@ export function fetchProfile() {
     audits: AuditorAudit[]
     application: { id: string; publicCode: string; status: string; createdAt: string } | null
     comments: StatusComment[]
+    commercialComments: StatusComment[]
   }>('/api/profile')
 }
 
-export function postStatusComment(text: string) {
+export function postStatusComment(
+  text: string,
+  track: 'auditor' | 'commercial' | 'fase_1' | 'fase_2' = 'auditor',
+) {
   return request<{
     comment: StatusComment
   }>('/api/status/comments', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, track }),
   })
 }
 
@@ -255,6 +267,25 @@ export function confirmIcf12Download() {
   )
 }
 
+export function confirmStage5Training() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>('/api/profile/stage5/training', {
+    method: 'POST',
+  })
+}
+
+export function confirmCasaMatrizDownload() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>(
+    '/api/profile/stage5/casa-matriz-download',
+    { method: 'POST' },
+  )
+}
+
+export function confirmStage6Training() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>('/api/profile/stage6/training', {
+    method: 'POST',
+  })
+}
+
 export function submitProfessionalProfile(payload: {
   dataTreatmentAccepted: boolean
 }) {
@@ -279,6 +310,19 @@ export function submitReview2() {
     '/api/profile/review2/submit',
     { method: 'POST' },
   )
+}
+
+export function submitCommercialContract() {
+  return request<{ user: PartnerUser; profile: ProfessionalProfile; publicCode: string }>(
+    '/api/profile/commercial-contract/submit',
+    { method: 'POST' },
+  )
+}
+
+export function confirmWhatsAppLink() {
+  return request<{ profile: ProfessionalProfile }>('/api/profile/whatsapp/confirm', {
+    method: 'POST',
+  })
 }
 
 export function createAudit(payload: Omit<AuditorAudit, 'id'>) {

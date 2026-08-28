@@ -15,9 +15,11 @@ export function portalBaseUrl() {
 }
 
 function fromAddress() {
-  const email = String(process.env.FROM_EMAIL || 'support@intercertlatam.com').trim()
+  const email = String(process.env.FROM_EMAIL || 'noreply@intercertlatam.com').trim()
   return `Portal Partners Intercert <${email}>`
 }
+
+const BLOCKED_EMAIL_RECIPIENTS = new Set(['support@intercertlatam.com'])
 
 export function escapeHtml(value) {
   return String(value ?? '')
@@ -83,6 +85,10 @@ export async function sendEmail({ to, subject, html }) {
   const key = apiKey()
   const recipient = String(to || '').trim()
   if (!recipient) return { sent: false, reason: 'missing_to' }
+  if (BLOCKED_EMAIL_RECIPIENTS.has(recipient.toLowerCase())) {
+    console.info(`[email] omitido destinatario interno ${recipient}: ${subject}`)
+    return { sent: false, reason: 'blocked_recipient' }
+  }
   if (!key) {
     console.warn(`[email] RESEND_API_KEY no configurada — omitiendo "${subject}" a ${recipient}`)
     return { sent: false, reason: 'not_configured' }

@@ -99,14 +99,17 @@ function reviewLabel(status: ReviewBadge) {
 
 function canDeleteDoc(
   category: string,
+  docReview: ReviewBadge,
   review1Status: ReviewStatus,
   review2Status: Review2Status,
 ) {
-  const review1Frozen = ['sent', 'in_review', 'validated', 'approved'].includes(review1Status)
-  const review2Frozen = ['sent', 'in_review', 'validated', 'approved'].includes(review2Status)
-  if (FASE1_CATEGORIES.includes(category) && review1Frozen) return false
-  if (FASE2_CATEGORIES.includes(category) && review2Frozen) return false
-  return true
+  const phase = FASE1_CATEGORIES.includes(category)
+    ? review1Status
+    : FASE2_CATEGORIES.includes(category)
+      ? review2Status
+      : 'pending'
+  if (phase === 'rejected') return docReview === 'rejected'
+  return !['sent', 'in_review', 'validated', 'approved'].includes(String(phase))
 }
 
 export function DocumentsPage() {
@@ -242,7 +245,7 @@ export function DocumentsPage() {
   }
 
   async function handleDelete(doc: RepoDoc) {
-    if (!canDeleteDoc(doc.category, review1Status, review2Status)) return
+    if (!canDeleteDoc(doc.category, doc.reviewStatus, review1Status, review2Status)) return
     setError('')
     setDocs((prev) => prev.filter((item) => item.id !== doc.id))
     try {
@@ -425,7 +428,7 @@ export function DocumentsPage() {
                   <DocCard
                     doc={doc}
                     busy={busyId === doc.id}
-                    canDelete={canDeleteDoc(doc.category, review1Status, review2Status)}
+                    canDelete={canDeleteDoc(doc.category, doc.reviewStatus, review1Status, review2Status)}
                     onPreview={isPreviewable(doc) ? handlePreview : undefined}
                     onDownload={() => handleDownload(doc)}
                     onDelete={() => handleDelete(doc)}
@@ -455,7 +458,7 @@ export function DocumentsPage() {
                   <DocActions
                     busy={busyId === doc.id}
                     canPreview={isPreviewable(doc)}
-                    canDelete={canDeleteDoc(doc.category, review1Status, review2Status)}
+                    canDelete={canDeleteDoc(doc.category, doc.reviewStatus, review1Status, review2Status)}
                     onPreview={() => handlePreview(doc)}
                     onDownload={() => handleDownload(doc)}
                     onDelete={() => handleDelete(doc)}

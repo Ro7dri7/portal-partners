@@ -10,6 +10,7 @@ export type UploadedFile = {
   status: 'uploading' | 'uploaded' | 'error'
   error?: string
   documentId?: string
+  reviewStatus?: 'pending' | 'approved' | 'rejected'
 }
 
 const MAX_SIZE = Number(import.meta.env.VITE_MAX_FILE_SIZE || 524288000)
@@ -28,6 +29,7 @@ type UploadZoneProps = {
   compact?: boolean
   disabled?: boolean
   onFiles: (files: UploadedFile[]) => void
+  onRemoveZone?: () => void
 }
 
 function formatSize(bytes: number) {
@@ -62,6 +64,7 @@ export function UploadZone({
   compact = false,
   disabled = false,
   onFiles,
+  onRemoveZone,
 }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -166,21 +169,36 @@ export function UploadZone({
           {acceptPdfOnly ? 'Solo PDF.' : 'PDF, Word o imagen. O haz clic para explorar.'}
         </p>
       </div>
-      <button
-        type="button"
-        disabled={disabled}
-        className={
-          buttonVariant === 'primary'
-            ? 'shrink-0 rounded-lg bg-secondary px-5 py-2 text-label-md font-semibold text-on-secondary shadow-sm transition-colors hover:bg-secondary/90 disabled:opacity-50'
-            : `${compact ? 'shrink-0 ' : 'mt-4 '}rounded-lg border border-outline-variant px-5 py-2 text-label-md font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:opacity-50`
-        }
-        onClick={(e) => {
-          e.stopPropagation()
-          if (!disabled) inputRef.current?.click()
-        }}
-      >
-        {buttonLabel}
-      </button>
+      <div className={`flex items-center gap-2 ${compact ? 'shrink-0' : 'mt-4'}`}>
+        <button
+          type="button"
+          disabled={disabled}
+          className={
+            buttonVariant === 'primary'
+              ? 'rounded-lg bg-secondary px-5 py-2 text-label-md font-semibold text-on-secondary shadow-sm transition-colors hover:bg-secondary/90 disabled:opacity-50'
+              : 'rounded-lg border border-outline-variant px-5 py-2 text-label-md font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:opacity-50'
+          }
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!disabled) inputRef.current?.click()
+          }}
+        >
+          {buttonLabel}
+        </button>
+        {onRemoveZone && (
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-error-container/40 hover:text-error"
+            aria-label="Quitar este espacio de carga"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemoveZone()
+            }}
+          >
+            <MaterialIcon name="close" className="text-[20px]" />
+          </button>
+        )}
+      </div>
       <input
         ref={inputRef}
         type="file"

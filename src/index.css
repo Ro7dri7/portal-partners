@@ -186,15 +186,28 @@
   z-index: 0;
   height: 0;
   background: #4ecdc4;
-  animation: timelineFillRise 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
 }
 
-@keyframes timelineFillRise {
+.timeline-icon-enter {
+  animation: timelineIconIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--icon-delay, 0s);
+}
+
+@keyframes timelineIconIn {
   from {
-    height: 0;
+    opacity: 0;
+    transform: scale(0.72);
   }
   to {
-    height: var(--fill-to, 100%);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-icon-enter {
+    animation: none;
   }
 }
 

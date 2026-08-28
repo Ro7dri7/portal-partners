@@ -13,6 +13,7 @@ export type DocReviewOutcome = {
   label: string
   fileName?: string
   status: 'approved' | 'rejected' | 'pending'
+  href: string
 }
 
 export type PipelineStep = {
@@ -23,7 +24,7 @@ export type PipelineStep = {
 }
 
 export type AuditorPhaseTrack = {
-  key: 'review1' | 'review2'
+  key: 'review1' | 'review2' | 'commercial'
   label: string
   subtitle: string
   unlocked: boolean
@@ -64,22 +65,26 @@ export const JOURNEY_STAGES: Array<{
   {
     key: 'documents',
     label: 'Conviértete en nuestro partner',
-    hint: 'Siguiente etapa',
+    hint: 'Envía tu contrato firmado',
+    href: '/dashboard/perfil?etapa=documents',
   },
   {
     key: 'review1',
     label: 'Conectados Contigo',
-    hint: 'Siguiente etapa',
+    hint: 'Únete al grupo de WhatsApp',
+    href: '/dashboard/perfil?etapa=review1',
   },
   {
     key: 'icf12',
     label: 'Aprende la parte técnica de Intercert',
-    hint: 'Siguiente etapa',
+    hint: 'Capacitación técnica',
+    href: '/dashboard/perfil?etapa=icf12',
   },
   {
     key: 'approved',
     label: 'Aprende la parte comercial de Intercert',
-    hint: 'Siguiente etapa',
+    hint: 'Capacitación comercial',
+    href: '/dashboard/capacitacion?video=commercial',
   },
 ]
 
@@ -96,6 +101,7 @@ const REVIEW1_DOC_LABELS: Record<string, string> = {
   lead_auditor_courses: 'Certificados de Auditor Líder',
   audits_relation: 'Relación de auditorías',
   icf12: 'Formato IC.F.1.2',
+  commercial_contract: 'Contrato comercial firmado',
 }
 
 function phaseSubmitted(status: string) {
@@ -114,7 +120,20 @@ export function getStage2FillPercent(
   if (profile.icf12Downloaded) return 60
   if (review1Status === 'approved' && profile.trainingCompleted) return 45
   if (review1Status === 'approved') return 30
+  if (profile.trainingCompleted) return 25
   return 15
+}
+
+export function getStage5FillPercent(
+  profile: ProfessionalProfile,
+  documents: Array<{ category: string }>,
+) {
+  if (documents.some((doc) => doc.category === 'casa_matriz_contract')) return 100
+  let fill = 0
+  if (profile.auditReportTrainingCompleted) fill += 25
+  if (documents.some((doc) => doc.category === 'advisor_rates')) fill += 25
+  if (profile.casaMatrizDownloaded) fill += 25
+  return fill
 }
 
 function review1DocsReady(documents: Array<{ category: string }>) {
@@ -139,6 +158,7 @@ function phaseDocOutcomes(
       label: REVIEW1_DOC_LABELS[category] || category,
       fileName: match?.file_name,
       status: docOutcomeStatus(raw),
+      href: `/dashboard/perfil?etapa=profile&doc=${category}`,
     }
   })
 }
@@ -193,6 +213,71 @@ function buildPipeline(status: string, unlocked: boolean, docs: DocReviewOutcome
   })
 }
 
+export function getCommercialPhaseTrack(
+  profile: ProfessionalProfile,
+  documents: Array<{
+    category: string
+    file_name?: string
+    review_status?: string
+    reviewStatus?: string
+  }> = [],
+): AuditorPhaseTrack {
+  const status = String(profile.commercialContractStatus || 'pending')
+  const unlocked = Boolean(profile.commercialContractSubmitted)
+  const docs = phaseDocOutcomes(['commercial_contract'], documents)
+  const defs: Array<{ key: PipelineStepKey | 'ceo'; label: string }> = [
+    { key: 'sent', label: 'Enviado' },
+    { key: 'in_review', label: 'En revisión' },
+    { key: 'validated', label: 'Validada' },
+    { key: 'ceo', label: 'Firma CEO Adjuntada' },
+  ]
+  if (!unlocked || status === 'pending' || status === 'locked') {
+    return {
+      key: 'commercial',
+      label: 'Fase 3 · Contrato Comercial',
+      subtitle: 'Contrato firmado y firma CEO',
+      unlocked: false,
+      complete: false,
+      steps: defs.map((d) => ({
+        key: d.key === 'ceo' ? 'validated' : (d.key as PipelineStepKey),
+        label: d.label,
+        state: 'pending',
+        docs: d.key === 'validated' ? docs : undefined,
+      })),
+    }
+  }
+  let furthest = 0
+  if (status === 'sent') furthest = 0
+  else if (status === 'in_review') furthest = 1
+  else if (status === 'validated' || status === 'approved' || status === 'rejected') furthest = 2
+  else if (status === 'ceo_signed') furthest = 3
+  const observed = status === 'rejected'
+  const approved = status === 'approved' || status === 'ceo_signed'
+  const steps: PipelineStep[] = defs.map((def, index) => {
+    const key = def.key === 'ceo' ? ('validated' as PipelineStepKey) : (def.key as PipelineStepKey)
+    const withDocs = def.key === 'validated' || def.key === 'ceo' ? docs : undefined
+    if (index < furthest) return { key, label: def.label, state: 'done' as const, docs: withDocs }
+    if (index > furthest) return { key, label: def.label, state: 'pending' as const, docs: withDocs }
+    if (def.key === 'sent') return { key, label: def.label, state: 'done' as const, docs: withDocs }
+    if (def.key === 'validated' && observed) return { key, label: def.label, state: 'rejected' as const, docs: withDocs }
+    if (def.key === 'validated' && (status === 'approved' || status === 'validated')) {
+      return { key, label: def.label, state: 'done' as const, docs: withDocs }
+    }
+    if (def.key === 'ceo' && status === 'ceo_signed') {
+      return { key, label: def.label, state: 'done' as const, docs: withDocs }
+    }
+    return { key, label: def.label, state: 'active' as const, docs: withDocs }
+  })
+  return {
+    key: 'commercial',
+    label: 'Fase 3 · Contrato Comercial',
+    subtitle: 'Contrato firmado y firma CEO',
+    unlocked: true,
+    complete: approved,
+    steps,
+  }
+}
+
 export function getAuditorProgress(
   profile: ProfessionalProfile,
   documents: Array<{
@@ -217,6 +302,7 @@ export function getAuditorProgress(
 
   const review1Docs = phaseDocOutcomes(REVIEW1_DOCS, documents)
   const review2Docs = phaseDocOutcomes(['icf12'], documents)
+  const commercialTrack = getCommercialPhaseTrack(profile, documents)
 
   const phaseTracks: AuditorPhaseTrack[] = [
     {
@@ -235,6 +321,7 @@ export function getAuditorProgress(
       complete: review2Done,
       steps: buildPipeline(review2Status, review2Unlocked, review2Docs),
     },
+    commercialTrack,
   ]
 
   const phases = phaseTracks.map((track) => {
@@ -263,6 +350,7 @@ export function getAuditorProgress(
   const submitted = phaseSubmitted(review1Status)
 
   const stage2Fill = getStage2FillPercent(profile, documents)
+  const stage2Done = stage2Fill >= 100
   let percent = stage2Fill
   if (!profile.contractDownloaded) percent = 0
 
@@ -294,7 +382,7 @@ export function getAuditorProgress(
   } else if (review1Done && !trainingCompleted) {
     headline = 'Completa la capacitación'
     description =
-      'Mira el video de inducción en Capacitación. Al terminarlo se habilita el formato IC.F.1.2.'
+      'Mira el video “¿Cómo llenar tu formato IC.F.1.2?” en Capacitación. Al terminarlo se habilita la fase 2.'
     badge = 'Capacitación'
   } else if (review1Done) {
     headline = 'Continúa con el formato IC.F.1.2'
@@ -319,36 +407,100 @@ export function getAuditorProgress(
     badge = 'Enviado'
   }
 
-  const stage2Done = stage2Fill >= 100
+  const commercialSubmitted = Boolean(profile.commercialContractSubmitted)
+  const commercialStatus = profile.commercialContractStatus || 'pending'
+  const stage3Fill = commercialSubmitted ? 100 : 0
+  const review2Submitted = phaseSubmitted(review2Status)
+  const bothPhasesSubmitted = submitted && review2Submitted
+  const whatsappConfirmed = Boolean(profile.whatsappConfirmed)
+  const stage5Fill = getStage5FillPercent(profile, documents)
+  const stage5Done = documents.some((doc) => doc.category === 'casa_matriz_contract')
+  const stage6Done = Boolean(profile.commercialTrainingCompleted)
   const completions = [
     Boolean(profile.contractDownloaded),
-    stage2Done,
-    false,
-    false,
-    false,
-    false,
+    bothPhasesSubmitted || stage2Done,
+    commercialSubmitted,
+    whatsappConfirmed,
+    stage5Done,
+    stage6Done,
   ]
   const currentIndex = completions.findIndex((done) => !done)
   const journey: JourneyStep[] = JOURNEY_STAGES.map((stage, index) => {
     const done = completions[index]
     const active = !done && (currentIndex === -1 ? false : index === currentIndex)
-    const fillPercent = index === 0 ? (done ? 100 : 0) : index === 1 ? stage2Fill : done ? 100 : 0
+    const fillPercent =
+      index === 0
+        ? done
+          ? 100
+          : 0
+        : index === 1
+          ? stage2Fill
+          : index === 2
+            ? stage3Fill
+            : index === 3
+              ? done
+                ? 100
+                : profile.whatsappGroupUrl
+                  ? 50
+                  : 0
+              : index === 4
+                ? done
+                  ? 100
+                  : stage5Fill
+                : done
+                  ? 100
+                  : 0
     const href =
       index === 1
-        ? '/dashboard/perfil?etapa=profile'
-        : done || active
-          ? stage.href
-          : undefined
+        ? bothPhasesSubmitted
+          ? '/dashboard/estado'
+          : '/dashboard/perfil?etapa=profile'
+        : index === 2
+          ? commercialSubmitted
+            ? '/dashboard/estado?tipo=contrato'
+            : '/dashboard/perfil?etapa=documents'
+          : index === 3
+            ? '/dashboard/perfil?etapa=review1'
+            : index === 4
+              ? '/dashboard/perfil?etapa=icf12'
+              : index === 5
+                ? '/dashboard/capacitacion?video=commercial'
+            : done || active
+              ? stage.href
+              : undefined
     return {
       ...stage,
       state: done ? 'done' : active ? 'active' : 'locked',
       fillPercent,
-      href: done || active || (index === 1 && Boolean(profile.contractDownloaded)) ? href : undefined,
+      href:
+        done ||
+        active ||
+        (index === 1 && Boolean(profile.contractDownloaded)) ||
+        (index === 2 && (stage2Done || bothPhasesSubmitted)) ||
+        (index === 3 && commercialSubmitted) ||
+        (index === 4 && whatsappConfirmed) ||
+        (index === 5 && stage5Done)
+          ? href
+          : undefined,
       shine: active,
       hint:
         index === 1 && submitted && !done
           ? `${stage2Fill}% del registro`
-          : stage.hint,
+          : index === 2 && commercialSubmitted
+            ? 'Contrato enviado'
+            : index === 3 && whatsappConfirmed
+              ? 'Grupo de WhatsApp'
+              : index === 3 && profile.whatsappGroupUrl
+                ? 'Únete al grupo de WhatsApp'
+                : index === 3
+                  ? 'En espera del coordinador comercial'
+                : index === 4 && done
+                  ? 'Capacitación técnica'
+                  : index === 4
+                    ? `${stage5Fill}% de la etapa`
+                    : index === 5 && done
+                      ? 'Capacitación comercial'
+                  : stage.hint,
     }
   })
 
@@ -365,6 +517,10 @@ export function getAuditorProgress(
   if (review2Status === 'in_review') activity.push('Revisión 2 en revisión por Operaciones.')
   if (review2Status === 'validated') activity.push('Revisión 2 validada.')
   if (review2Done) activity.push('Fase 2 aprobada. Registro completado.')
+  if (commercialSubmitted) activity.push('Contrato comercial enviado.')
+  if (commercialStatus === 'approved' || commercialStatus === 'ceo_signed') {
+    activity.push('Contrato comercial aprobado.')
+  }
   if (activity.length === 0) {
     activity.push('Aún no hay avance. Completa la documentación de Partner Auditor.')
   }
@@ -386,6 +542,11 @@ export function getAuditorProgress(
     journey,
     review1Done,
     review2Done,
+    review2Submitted,
+    bothPhasesSubmitted,
+    commercialSubmitted,
+    commercialStatus,
+    stage3Fill,
     datos: docsReady,
     formacion: docsReady,
     documentos: docsReady,

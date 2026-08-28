@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from '../app-router'
-import { confirmStage2Training, fetchProfile } from '../api'
+import {
+  confirmStage2Training,
+  confirmStage5Training,
+  confirmStage6Training,
+  fetchProfile,
+} from '../api'
 import TrainingCatalog, { type TrainingItem } from '../components/TrainingCatalog'
 import { MaterialIcon } from '../components/MaterialIcon'
 import type { PartnerUser } from '../constants'
@@ -9,9 +14,47 @@ type DashboardContext = {
   user: PartnerUser
 }
 
-const INTRO_VIDEO_SRC = '/videos/introduccion-partner.mp4'
+export const ICF12_TRAINING_ID = 'icf12-format'
+export const AUDIT_REPORT_TRAINING_ID = 'audit-report-fill'
+export const COMMERCIAL_TRAINING_ID = 'commercial-training'
+const ICF12_VIDEO_SRC = '/videos/icf12-formato.mp4'
+const AUDIT_REPORT_VIDEO_SRC = `/videos/${encodeURIComponent('videoplayback (1).mp4')}`
+const COVER_OPS =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuAk604ldHs9fYP8K4K0ep2srOT9FGqIwhOiQPpCt8vnU-1EivLJAE-u696eO7843DoUQREOwZTdtFrG0UlGlEgcgEdmiD5sRQg1qDR2c0ifCGgr_WEP9zpuiXtaWFa8jNf1KoSJaLDbn84sTzP7W0-kxEYZmZcZJAGY6ZCskENUg01xyRQUTPpsJP_BuBViTGxlHVZLSX8bRVXIIS-zxoEckupVmU852xSVZlXyXN653WAEOptnbyYCQw'
+const COVER_COM =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuCCG2riP3FP6gAFSJ7vddktcB3C8ZnGP8INezzmrrEZNLTWK1naB8gQXt7O5Y0SJLNs0x_cbSdsCqsuIMYA2-ImaL4ZJ0RpuloS2z_xrw-ydJG_c_HNaN3urmyyTD3iyfrvtFfDowkqmc8i3a2XU1p38itFgDSHtKgtrA-aDrk5p_swmR-6rnCbpmDikM3CE3yqQC9ToMz1zGDfp77f2O9Ytrtvpyn5R-RHmW-YshwjExcRrb9UXb1hIw'
 
 const TRAINING_ITEMS: TrainingItem[] = [
+  {
+    id: AUDIT_REPORT_TRAINING_ID,
+    area: 'operaciones',
+    title: 'Capacitación de Llenado de Reporte de Auditoria',
+    description:
+      'Aprende a completar el reporte de auditoría para continuar la etapa técnica de Intercert.',
+    tag: 'Operaciones',
+    tagTone: 'iso',
+    duration: '',
+    durationSeconds: 0,
+    image: COVER_OPS,
+    action: 'play',
+    videoSrc: AUDIT_REPORT_VIDEO_SRC,
+    tracksCompletion: true,
+  },
+  {
+    id: ICF12_TRAINING_ID,
+    area: 'operaciones',
+    title: '¿Cómo llenar tu formato IC.F.1.2?',
+    description:
+      'Aprende a completar el formato Application and Auditor Registration - Initial para continuar tu registro como Partner Auditor.',
+    tag: 'Registro',
+    tagTone: 'iso',
+    duration: '',
+    durationSeconds: 0,
+    image: COVER_OPS,
+    action: 'play',
+    videoSrc: ICF12_VIDEO_SRC,
+    tracksCompletion: true,
+  },
   {
     id: 'iso-flow',
     area: 'operaciones',
@@ -22,8 +65,7 @@ const TRAINING_ITEMS: TrainingItem[] = [
     tagTone: 'iso',
     duration: '12:45',
     durationSeconds: 12,
-    image:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuAk604ldHs9fYP8K4K0ep2srOT9FGqIwhOiQPpCt8vnU-1EivLJAE-u696eO7843DoUQREOwZTdtFrG0UlGlEgcgEdmiD5sRQg1qDR2c0ifCGgr_WEP9zpuiXtaWFa8jNf1KoSJaLDbn84sTzP7W0-kxEYZmZcZJAGY6ZCskENUg01xyRQUTPpsJP_BuBViTGxlHVZLSX8bRVXIIS-zxoEckupVmU852xSVZlXyXN653WAEOptnbyYCQw',
+    image: COVER_OPS,
     action: 'play',
   },
   {
@@ -41,6 +83,21 @@ const TRAINING_ITEMS: TrainingItem[] = [
     action: 'download',
   },
   {
+    id: COMMERCIAL_TRAINING_ID,
+    area: 'comercial',
+    title: 'Capacitación comercial',
+    description:
+      'Capacitación comercial de Intercert para completar la etapa 6 de tu proceso como Partner.',
+    tag: 'Ventas',
+    tagTone: 'ventas',
+    duration: '',
+    durationSeconds: 0,
+    image: COVER_COM,
+    action: 'play',
+    videoSrc: AUDIT_REPORT_VIDEO_SRC,
+    tracksCompletion: true,
+  },
+  {
     id: 'sales-speech',
     area: 'comercial',
     title: 'Speech de Ventas Efectivo',
@@ -50,8 +107,7 @@ const TRAINING_ITEMS: TrainingItem[] = [
     tagTone: 'ventas',
     duration: '15:10',
     durationSeconds: 15,
-    image:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuCCG2riP3FP6gAFSJ7vddktcB3C8ZnGP8INezzmrrEZNLTWK1naB8gQXt7O5Y0SJLNs0x_cbSdsCqsuIMYA2-ImaL4ZJ0RpuloS2z_xrw-ydJG_c_HNaN3urmyyTD3iyfrvtFfDowkqmc8i3a2XU1p38itFgDSHtKgtrA-aDrk5p_swmR-6rnCbpmDikM3CE3yqQC9ToMz1zGDfp77f2O9Ytrtvpyn5R-RHmW-YshwjExcRrb9UXb1hIw',
+    image: COVER_COM,
     action: 'play',
   },
   {
@@ -70,31 +126,64 @@ const TRAINING_ITEMS: TrainingItem[] = [
   },
 ]
 
+const AUDITOR_VIDEO_IDS = new Set([
+  ICF12_TRAINING_ID,
+  AUDIT_REPORT_TRAINING_ID,
+  COMMERCIAL_TRAINING_ID,
+])
+
+function videoFromQuery(video: string | null) {
+  if (video === 'icf12' || video === ICF12_TRAINING_ID) return ICF12_TRAINING_ID
+  if (video === 'audit-report' || video === AUDIT_REPORT_TRAINING_ID) return AUDIT_REPORT_TRAINING_ID
+  if (video === 'commercial' || video === COMMERCIAL_TRAINING_ID) return COMMERCIAL_TRAINING_ID
+  return null
+}
+
 export function TrainingPage() {
   const { user } = useOutletContext<DashboardContext>()
   const isAuditor = user.role === 'partner_auditor'
-  const [completed, setCompleted] = useState(false)
+  const [completedIds, setCompletedIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [justDone, setJustDone] = useState(false)
+  const [donePopup, setDonePopup] = useState<string | null>(null)
+  const query = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
+  const autoOpenId = isAuditor ? videoFromQuery(query.get('video')) : null
 
   useEffect(() => {
     if (!isAuditor) return
     fetchProfile()
       .then((data) => {
-        setCompleted(Boolean(data.profile.trainingCompleted))
+        const ids: string[] = []
+        if (data.profile.trainingCompleted) ids.push(ICF12_TRAINING_ID)
+        if (data.profile.auditReportTrainingCompleted) ids.push(AUDIT_REPORT_TRAINING_ID)
+        if (data.profile.commercialTrainingCompleted) ids.push(COMMERCIAL_TRAINING_ID)
+        setCompletedIds(ids)
       })
       .catch(() => {})
   }, [isAuditor])
 
-  async function handleVideoEnded() {
-    if (completed || saving) return
+  useEffect(() => {
+    if (!autoOpenId) return
+    const timer = window.setTimeout(() => {
+      document.getElementById('training-player')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [autoOpenId])
+
+  async function handleTrackedVideoComplete(id: string) {
+    if (!AUDITOR_VIDEO_IDS.has(id)) return
+    setDonePopup(id)
+    if (!isAuditor || completedIds.includes(id) || saving) return
     setSaving(true)
     setError('')
     try {
-      await confirmStage2Training()
-      setCompleted(true)
-      setJustDone(true)
+      if (id === ICF12_TRAINING_ID) await confirmStage2Training()
+      else if (id === AUDIT_REPORT_TRAINING_ID) await confirmStage5Training()
+      else if (id === COMMERCIAL_TRAINING_ID) await confirmStage6Training()
+      setCompletedIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo registrar la capacitación.')
     } finally {
@@ -102,8 +191,46 @@ export function TrainingPage() {
     }
   }
 
+  const popupCopy =
+    donePopup === AUDIT_REPORT_TRAINING_ID
+      ? {
+          body: 'Completaste la capacitación de llenado de reporte. Continúa con las actividades de la etapa 5.',
+          to: '/dashboard/perfil?etapa=icf12',
+          label: 'Volver a la etapa 5',
+        }
+      : donePopup === COMMERCIAL_TRAINING_ID
+        ? {
+            body: 'Completaste la capacitación comercial. La etapa 6 quedó al 100%.',
+            to: '/dashboard',
+            label: 'Volver al dashboard',
+          }
+        : {
+            body: 'Completaste la capacitación. Ya puedes continuar tu registro en Mi Perfil.',
+            to: '/dashboard/perfil?etapa=profile',
+            label: 'Volver a Mi Perfil',
+          }
+
   return (
     <div className="mx-auto w-full max-w-container-max space-y-4">
+      {donePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0A165E]/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-level-2">
+            <MaterialIcon name="check_circle" filled className="text-[48px] text-[#4ECDC4]" />
+            <p className="mt-3 text-headline-sm font-bold text-[#0A165E]">Video Culminado</p>
+            <p className="mt-1 text-body-md text-[#64748b]">{popupCopy.body}</p>
+            {error && (
+              <p className="mt-2 text-body-md text-on-error-container">{error}</p>
+            )}
+            <Link
+              to={popupCopy.to}
+              className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[#0A165E] px-4 py-2.5 text-label-md font-semibold text-white hover:bg-[#0A165E]/90"
+            >
+              {popupCopy.label}
+            </Link>
+          </div>
+        </div>
+      )}
+
       <section>
         <h2 className="mb-1 text-headline-md font-bold text-primary">Centro de Capacitación</h2>
         <p className="text-body-md text-on-surface-variant">
@@ -112,54 +239,16 @@ export function TrainingPage() {
         </p>
       </section>
 
-      {isAuditor && (
-        <section className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-level-1">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <p className="text-label-md font-semibold text-[#0A165E]">
-                Video de inducción al registro
-              </p>
-              <p className="text-sm text-on-surface-variant">
-                Debes verlo completo para habilitar la fase 2.
-              </p>
-            </div>
-            <span
-              className={`rounded-full px-3 py-1 text-label-sm font-bold ${
-                completed ? 'bg-[#d9f0e3] text-[#146c43]' : 'bg-warning-bg text-warning'
-              }`}
-            >
-              {completed ? 'Completado' : saving ? 'Registrando...' : 'Pendiente'}
-            </span>
-          </div>
-          <video
-            className="max-h-[420px] w-full bg-black object-contain"
-            controls
-            playsInline
-            poster="/partners-logo-blanco.png"
-            onEnded={() => void handleVideoEnded()}
-          >
-            <source src={INTRO_VIDEO_SRC} type="video/mp4" />
-          </video>
-          {error && (
-            <p className="px-4 py-3 text-body-md text-on-error-container">{error}</p>
-          )}
-          {justDone && (
-            <div className="flex flex-col gap-3 border-t border-outline-variant/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-body-md text-[#146c43]">
-                Capacitación completada. Ya puedes continuar con la fase 2 en tu registro.
-              </p>
-              <Link
-                to="/dashboard/perfil"
-                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[#0A165E] px-4 py-2 text-label-md font-semibold text-white"
-              >
-                Volver al registro
-              </Link>
-            </div>
-          )}
-        </section>
-      )}
-
-      <TrainingCatalog items={TRAINING_ITEMS} />
+      <TrainingCatalog
+        items={
+          isAuditor
+            ? TRAINING_ITEMS
+            : TRAINING_ITEMS.filter((item) => !AUDITOR_VIDEO_IDS.has(item.id))
+        }
+        autoOpenId={autoOpenId}
+        completedIds={completedIds}
+        onTrackedVideoComplete={(id) => void handleTrackedVideoComplete(id)}
+      />
     </div>
   )
 }

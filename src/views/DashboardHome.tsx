@@ -128,10 +128,10 @@ export function DashboardHome() {
               </p>
             </div>
             <Link
-              to={progress?.review2Done ? '/dashboard/estado' : '/dashboard/perfil'}
+              to={progress?.bothPhasesSubmitted ? '/dashboard/estado' : '/dashboard/perfil'}
               className="shrink-0 rounded-lg bg-primary px-4 py-2 text-label-md font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
-              {progress?.review2Done ? 'Ver detalles' : 'Continuar'}
+              {progress?.bothPhasesSubmitted ? 'Ver estado' : 'Continuar'}
             </Link>
           </div>
 

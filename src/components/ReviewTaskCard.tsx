@@ -1,7 +1,14 @@
 import { useState, type ReactNode } from 'react'
 import { MaterialIcon } from './MaterialIcon'
 
-export type ReviewTaskStatus = 'pending' | 'ready' | 'in_review' | 'approved' | 'rejected' | 'locked'
+export type ReviewTaskStatus =
+  | 'pending'
+  | 'ready'
+  | 'in_review'
+  | 'approved'
+  | 'rejected'
+  | 'locked'
+  | 'completed'
 
 const BADGE: Record<ReviewTaskStatus, { label: string; className: string } | null> = {
   pending: null,
@@ -15,6 +22,10 @@ const BADGE: Record<ReviewTaskStatus, { label: string; className: string } | nul
   },
   approved: {
     label: 'Aprobado',
+    className: 'bg-[#d9f0e3] text-[#146c43]',
+  },
+  completed: {
+    label: 'Completado',
     className: 'bg-[#d9f0e3] text-[#146c43]',
   },
   rejected: {
@@ -34,6 +45,7 @@ type ReviewTaskCardProps = {
   status: ReviewTaskStatus
   children?: ReactNode
   defaultOpen?: boolean
+  cardId?: string
 }
 
 export function ReviewTaskCard({
@@ -43,10 +55,11 @@ export function ReviewTaskCard({
   status,
   children,
   defaultOpen = false,
+  cardId,
 }: ReviewTaskCardProps) {
   const [open, setOpen] = useState(defaultOpen)
   const badge = BADGE[status]
-  const done = status === 'approved'
+  const done = status === 'approved' || status === 'completed'
   const locked = status === 'locked'
 
   const iconWrap =
@@ -55,7 +68,7 @@ export function ReviewTaskCard({
       : locked
         ? 'border border-outline-variant/70 bg-surface-container-low text-outline'
         : status === 'rejected'
-          ? 'bg-error-container text-error'
+          ? 'bg-error text-on-error'
           : status === 'in_review'
             ? 'bg-warning-bg text-warning'
             : status === 'ready'
@@ -64,6 +77,7 @@ export function ReviewTaskCard({
 
   return (
     <div
+      id={cardId}
       className={`overflow-hidden rounded-2xl border bg-white transition-all ${
         open
           ? 'border-secondary/25 shadow-level-1'
@@ -77,8 +91,8 @@ export function ReviewTaskCard({
       >
         <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconWrap}`}>
           <MaterialIcon
-            name={done ? 'check' : locked ? 'lock' : status === 'rejected' ? 'error' : icon}
-            filled={done || status === 'in_review'}
+            name={done ? 'check' : locked ? 'lock' : status === 'rejected' ? 'close' : icon}
+            filled={done || status === 'rejected' || status === 'in_review'}
             className="text-[22px]"
           />
         </span>
