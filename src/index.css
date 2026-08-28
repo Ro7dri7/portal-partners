@@ -179,30 +179,22 @@
     timelineShine 1.6s ease-in-out infinite;
 }
 
-.timeline-water {
-  transition: height 0.7s ease;
-}
-
-.timeline-water::after {
-  content: "";
+.timeline-fill {
   position: absolute;
-  left: -20%;
-  top: -10px;
-  width: 140%;
-  height: 18px;
-  border-radius: 50%;
-  background: inherit;
-  filter: brightness(1.12);
-  animation: timelineWave 2.4s ease-in-out infinite;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 0;
+  height: 0;
+  background: #4ecdc4;
+  animation: timelineFillRise 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-@keyframes timelineWave {
-  0%,
-  100% {
-    transform: translateX(0);
+@keyframes timelineFillRise {
+  from {
+    height: 0;
   }
-  50% {
-    transform: translateX(8%);
+  to {
+    height: var(--fill-to, 100%);
   }
 }
 
@@ -224,6 +216,35 @@
 .glass-card {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
+}
+
+@keyframes accordionIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stage-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stage-panel[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.stage-panel-inner {
+  overflow: hidden;
+}
+
+.stage-panel[data-open='true'] .stage-panel-body {
+  animation: accordionIn 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sidebar-rail {

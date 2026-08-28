@@ -43,21 +43,52 @@ export type JourneyStep = {
   shine?: boolean
 }
 
-export const DEFAULT_JOURNEY: JourneyStep[] = [
-  { key: 'account', label: 'Cuenta', hint: 'Registro completado', state: 'done' },
-  { key: 'profile', label: 'Perfil', hint: 'Datos personales', state: 'active' },
+export const JOURNEY_STAGES: Array<{
+  key: JourneyStep['key']
+  label: string
+  hint: string
+  href?: string
+}> = [
+  {
+    key: 'account',
+    label: 'Bienvenido a Intercert Partners',
+    hint: 'Descarga tu contrato',
+    href: '/dashboard/perfil?etapa=account',
+  },
+  {
+    key: 'profile',
+    label: 'Regístrate como Partner de Intercert',
+    hint: 'Completa tu registro',
+    href: '/dashboard/perfil?etapa=profile',
+  },
   {
     key: 'documents',
-    label: 'Documentos',
-    hint: 'CV y evidencias',
-    state: 'pending',
-    fillPercent: 0,
-    href: '/dashboard/perfil',
+    label: 'Conviértete en nuestro partner',
+    hint: 'Siguiente etapa',
   },
-  { key: 'review1', label: 'Fase 1', hint: 'Verificación', state: 'pending' },
-  { key: 'icf12', label: 'IC.F.1.2', hint: 'Formato de registro', state: 'locked' },
-  { key: 'approved', label: 'Aprobado', hint: 'Partner habilitado', state: 'pending' },
+  {
+    key: 'review1',
+    label: 'Conectados Contigo',
+    hint: 'Siguiente etapa',
+  },
+  {
+    key: 'icf12',
+    label: 'Aprende la parte técnica de Intercert',
+    hint: 'Siguiente etapa',
+  },
+  {
+    key: 'approved',
+    label: 'Aprende la parte comercial de Intercert',
+    hint: 'Siguiente etapa',
+  },
 ]
+
+export const DEFAULT_JOURNEY: JourneyStep[] = JOURNEY_STAGES.map((stage, index) => ({
+  ...stage,
+  state: index === 0 ? 'active' : 'locked',
+  fillPercent: 0,
+  shine: index === 0,
+}))
 
 const REVIEW1_DOC_LABELS: Record<string, string> = {
   cv: 'CV documentado y actualizado',
@@ -65,6 +96,25 @@ const REVIEW1_DOC_LABELS: Record<string, string> = {
   lead_auditor_courses: 'Certificados de Auditor Líder',
   audits_relation: 'Relación de auditorías',
   icf12: 'Formato IC.F.1.2',
+}
+
+function phaseSubmitted(status: string) {
+  return ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(status)
+}
+
+export function getStage2FillPercent(
+  profile: ProfessionalProfile,
+  documents: Array<{ category: string }>,
+) {
+  const review1Status = profile.review1Status || (profile.submitted ? 'sent' : 'pending')
+  if (!phaseSubmitted(review1Status)) return 0
+  if (profile.review2Status === 'approved') return 100
+  const icf12Uploaded = documents.some((doc) => doc.category === 'icf12')
+  if (icf12Uploaded) return 80
+  if (profile.icf12Downloaded) return 60
+  if (review1Status === 'approved' && profile.trainingCompleted) return 45
+  if (review1Status === 'approved') return 30
+  return 15
 }
 
 function review1DocsReady(documents: Array<{ category: string }>) {
@@ -162,7 +212,8 @@ export function getAuditorProgress(
 
   const review1Done = review1Status === 'approved'
   const review2Done = review2Status === 'approved'
-  const review2Unlocked = review1Done
+  const trainingCompleted = Boolean(profile.trainingCompleted)
+  const review2Unlocked = review1Done && trainingCompleted
 
   const review1Docs = phaseDocOutcomes(REVIEW1_DOCS, documents)
   const review2Docs = phaseDocOutcomes(['icf12'], documents)
@@ -209,22 +260,11 @@ export function getAuditorProgress(
     }
   })
 
-  const submitted = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
-    review1Status,
-  )
+  const submitted = phaseSubmitted(review1Status)
 
-  let percent = 5
-  if (docsReady) percent = 15
-  if (submitted) percent = 25
-  if (review1Status === 'in_review') percent = 40
-  if (review1Status === 'validated') percent = 50
-  if (review1Done) percent = 55
-  if (['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(review2Status)) {
-    percent = 70
-  }
-  if (review2Status === 'in_review') percent = 82
-  if (review2Status === 'validated') percent = 92
-  if (review2Done) percent = 100
+  const stage2Fill = getStage2FillPercent(profile, documents)
+  let percent = stage2Fill
+  if (!profile.contractDownloaded) percent = 0
 
   let headline = 'Completa la revisión de documentación'
   let description =
@@ -251,6 +291,11 @@ export function getAuditorProgress(
     headline = 'Formato IC.F.1.2 enviado'
     description = 'Tu solicitud de fase 2 fue enviada. Esperando que Operaciones la tome en revisión.'
     badge = 'Enviado'
+  } else if (review1Done && !trainingCompleted) {
+    headline = 'Completa la capacitación'
+    description =
+      'Mira el video de inducción en Capacitación. Al terminarlo se habilita el formato IC.F.1.2.'
+    badge = 'Capacitación'
   } else if (review1Done) {
     headline = 'Continúa con el formato IC.F.1.2'
     description =
@@ -274,83 +319,38 @@ export function getAuditorProgress(
     badge = 'Enviado'
   }
 
-  const profileStarted = Boolean(profile.documentId || profile.phone || profile.country)
-  const review1Started = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
-    review1Status,
-  )
-  const review2Started = ['sent', 'in_review', 'validated', 'approved', 'rejected'].includes(
-    review2Status,
-  )
-
-  const documentsFill = review2Done
-    ? 100
-    : review2Started || icf12Ready
-      ? 60
-      : review1Done
-        ? 40
-        : review1Started
-          ? 20
-          : 0
-
-  const journey: JourneyStep[] = [
-    {
-      key: 'account',
-      label: 'Cuenta',
-      hint: 'Registro completado',
-      state: 'done',
-    },
-    {
-      key: 'profile',
-      label: 'Perfil',
-      hint: 'Datos personales',
-      state: profileStarted ? 'done' : 'pending',
-    },
-    {
-      key: 'documents',
-      label: 'Documentos',
-      hint: documentsFill === 0 ? 'Sube tu documentación' : 'Avance de documentación',
-      state: documentsFill >= 100 ? 'done' : 'pending',
-      fillPercent: documentsFill,
-      href: documentsFill === 0 ? '/dashboard/perfil' : '/dashboard/estado',
-    },
-    {
-      key: 'review1',
-      label: 'Fase 1',
-      hint: 'Verificación',
-      state: review1Done ? 'done' : review1Status === 'rejected' ? 'rejected' : 'pending',
-    },
-    {
-      key: 'icf12',
-      label: 'IC.F.1.2',
-      hint: 'Formato de registro',
-      state: !review1Done ? 'locked' : review2Done ? 'done' : 'pending',
-    },
-    {
-      key: 'approved',
-      label: 'Aprobado',
-      hint: 'Partner habilitado',
-      state: review2Done ? 'done' : review2Status === 'rejected' ? 'rejected' : 'pending',
-    },
+  const stage2Done = stage2Fill >= 100
+  const completions = [
+    Boolean(profile.contractDownloaded),
+    stage2Done,
+    false,
+    false,
+    false,
+    false,
   ]
-
-  const currentKey =
-    !profileStarted && documentsFill === 0
-      ? 'profile'
-      : documentsFill < 100
-        ? 'documents'
-        : journey.find((step) => step.state === 'pending')?.key || null
-
-  if (currentKey) {
-    const currentIndex = journey.findIndex((step) => step.key === currentKey)
-    if (currentIndex >= 0) {
-      journey[currentIndex] = { ...journey[currentIndex], state: 'active', shine: true }
-      for (let i = currentIndex + 1; i < journey.length; i += 1) {
-        if (journey[i].state !== 'done' && journey[i].state !== 'rejected') {
-          journey[i] = { ...journey[i], state: 'locked', shine: false }
-        }
-      }
+  const currentIndex = completions.findIndex((done) => !done)
+  const journey: JourneyStep[] = JOURNEY_STAGES.map((stage, index) => {
+    const done = completions[index]
+    const active = !done && (currentIndex === -1 ? false : index === currentIndex)
+    const fillPercent = index === 0 ? (done ? 100 : 0) : index === 1 ? stage2Fill : done ? 100 : 0
+    const href =
+      index === 1
+        ? '/dashboard/perfil?etapa=profile'
+        : done || active
+          ? stage.href
+          : undefined
+    return {
+      ...stage,
+      state: done ? 'done' : active ? 'active' : 'locked',
+      fillPercent,
+      href: done || active || (index === 1 && Boolean(profile.contractDownloaded)) ? href : undefined,
+      shine: active,
+      hint:
+        index === 1 && submitted && !done
+          ? `${stage2Fill}% del registro`
+          : stage.hint,
     }
-  }
+  })
 
   const activity: string[] = []
   if (docsReady) activity.push('Documentos de la revisión 1 cargados.')

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from '../app-router'
 import { fetchProfile, requestAuditorRole } from '../api'
-import { DashboardStageCarousel } from '../components/DashboardStageCarousel'
+import { AuditorJourneyTimeline } from '../components/AuditorJourneyTimeline'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { saveUser, type PartnerUser } from '../constants'
 import { getAuditorProgress, DEFAULT_JOURNEY } from '../utils/auditorProgress'
@@ -154,9 +154,10 @@ export function DashboardHome() {
 
       <div className="flex min-h-0 flex-1 flex-col">
         {isAuditor && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <DashboardStageCarousel steps={progress?.journey || DEFAULT_JOURNEY} />
-          </div>
+          <>
+            <AuditorJourneyTimeline steps={progress?.journey || DEFAULT_JOURNEY} />
+            <IntroVideo />
+          </>
         )}
         <div className="mt-4 shrink-0">
           <h3 className="mb-3 text-headline-sm font-semibold text-primary">Acciones Rápidas</h3>
@@ -191,6 +192,27 @@ export function DashboardHome() {
         </div>
       </div>
     </div>
+  )
+}
+
+const INTRO_VIDEO_SRC = '/videos/introduccion-partner.mp4'
+
+function IntroVideo() {
+  return (
+    <section className="mt-4 shrink-0 overflow-hidden rounded-xl border border-outline-variant/30 bg-[#0A165E] shadow-level-1">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <p className="text-label-md font-semibold text-white">Video de introducción</p>
+        <p className="text-sm text-white/70">Introducción al Partner Portal</p>
+      </div>
+      <video
+        className="max-h-[280px] w-full bg-black object-contain"
+        controls
+        playsInline
+        poster="/partners-logo-blanco.png"
+      >
+        <source src={INTRO_VIDEO_SRC} type="video/mp4" />
+      </video>
+    </section>
   )
 }
 

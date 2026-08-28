@@ -1,4 +1,15 @@
+import { useEffect, useState } from 'react'
+import { Link, useOutletContext } from '../app-router'
+import { confirmStage2Training, fetchProfile } from '../api'
 import TrainingCatalog, { type TrainingItem } from '../components/TrainingCatalog'
+import { MaterialIcon } from '../components/MaterialIcon'
+import type { PartnerUser } from '../constants'
+
+type DashboardContext = {
+  user: PartnerUser
+}
+
+const INTRO_VIDEO_SRC = '/videos/introduccion-partner.mp4'
 
 const TRAINING_ITEMS: TrainingItem[] = [
   {
@@ -40,7 +51,7 @@ const TRAINING_ITEMS: TrainingItem[] = [
     duration: '15:10',
     durationSeconds: 15,
     image:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuCCG2riP3FP6gAFSJ7vddktcB3C8ZnGP8INezzmrrEZNLTWK1naB8gQXt7O5Y0SJLNs0x_cbSdsCqsuIMYA2-ImaL4ZJ0RpuloS2z_xrw-ydJG_c_HNaN3urmyyTD3iyfrvtFfDowkqmc8I3a2XU1p38itFgDSHtKgtrA-aDrk5p_swmR-6rnCbpmDikM3CE3yqQC9ToMz1zGDfp77f2O9Ytrtvpyn5R-RHmW-YshwjExcRrb9UXb1hIw',
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuCCG2riP3FP6gAFSJ7vddktcB3C8ZnGP8INezzmrrEZNLTWK1naB8gQXt7O5Y0SJLNs0x_cbSdsCqsuIMYA2-ImaL4ZJ0RpuloS2z_xrw-ydJG_c_HNaN3urmyyTD3iyfrvtFfDowkqmc8i3a2XU1p38itFgDSHtKgtrA-aDrk5p_swmR-6rnCbpmDikM3CE3yqQC9ToMz1zGDfp77f2O9Ytrtvpyn5R-RHmW-YshwjExcRrb9UXb1hIw',
     action: 'play',
   },
   {
@@ -60,6 +71,37 @@ const TRAINING_ITEMS: TrainingItem[] = [
 ]
 
 export function TrainingPage() {
+  const { user } = useOutletContext<DashboardContext>()
+  const isAuditor = user.role === 'partner_auditor'
+  const [completed, setCompleted] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [justDone, setJustDone] = useState(false)
+
+  useEffect(() => {
+    if (!isAuditor) return
+    fetchProfile()
+      .then((data) => {
+        setCompleted(Boolean(data.profile.trainingCompleted))
+      })
+      .catch(() => {})
+  }, [isAuditor])
+
+  async function handleVideoEnded() {
+    if (completed || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await confirmStage2Training()
+      setCompleted(true)
+      setJustDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo registrar la capacitación.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-container-max space-y-4">
       <section>
@@ -69,6 +111,54 @@ export function TrainingPage() {
           comerciales.
         </p>
       </section>
+
+      {isAuditor && (
+        <section className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-level-1">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-label-md font-semibold text-[#0A165E]">
+                Video de inducción al registro
+              </p>
+              <p className="text-sm text-on-surface-variant">
+                Debes verlo completo para habilitar la fase 2.
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-3 py-1 text-label-sm font-bold ${
+                completed ? 'bg-[#d9f0e3] text-[#146c43]' : 'bg-warning-bg text-warning'
+              }`}
+            >
+              {completed ? 'Completado' : saving ? 'Registrando...' : 'Pendiente'}
+            </span>
+          </div>
+          <video
+            className="max-h-[420px] w-full bg-black object-contain"
+            controls
+            playsInline
+            poster="/partners-logo-blanco.png"
+            onEnded={() => void handleVideoEnded()}
+          >
+            <source src={INTRO_VIDEO_SRC} type="video/mp4" />
+          </video>
+          {error && (
+            <p className="px-4 py-3 text-body-md text-on-error-container">{error}</p>
+          )}
+          {justDone && (
+            <div className="flex flex-col gap-3 border-t border-outline-variant/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-body-md text-[#146c43]">
+                Capacitación completada. Ya puedes continuar con la fase 2 en tu registro.
+              </p>
+              <Link
+                to="/dashboard/perfil"
+                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[#0A165E] px-4 py-2 text-label-md font-semibold text-white"
+              >
+                Volver al registro
+              </Link>
+            </div>
+          )}
+        </section>
+      )}
+
       <TrainingCatalog items={TRAINING_ITEMS} />
     </div>
   )

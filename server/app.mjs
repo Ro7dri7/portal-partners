@@ -141,20 +141,34 @@ async function notifyHelpdeskPartnerAuditor({
     tags: `portal_partners,partner_auditor,fase_${stage}`,
   }
   try {
-    const resp = await fetch(`${baseUrl}/integrations/portal/partner-auditor-applications`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': apiKey,
-      },
-      body: JSON.stringify(payload),
-    })
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '')
-      console.warn('[helpdesk] partner-auditor sync failed', resp.status, text.slice(0, 400))
-      return null
+    let lastError = ''
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        const resp = await fetch(`${baseUrl}/integrations/portal/partner-auditor-applications`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': apiKey,
+          },
+          body: JSON.stringify(payload),
+        })
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({ ok: true }))
+          console.info('[helpdesk] partner-auditor ticket sync ok', data?.ticket_id || data?.id || '')
+          return data
+        }
+        lastError = `${resp.status} ${await resp.text().catch(() => '')}`
+        console.warn('[helpdesk] partner-auditor sync failed', lastError.slice(0, 400))
+      } catch (err) {
+        lastError = err?.message || String(err)
+        console.warn(`[helpdesk] partner-auditor sync error (intento ${attempt}/4)`, lastError)
+      }
+      if (attempt < 4) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt))
+      }
     }
-    return await resp.json().catch(() => ({ ok: true }))
+    console.error('[helpdesk] partner-auditor sync agotó reintentos:', lastError.slice(0, 400))
+    return null
   } catch (err) {
     console.warn('[helpdesk] partner-auditor sync error', err?.message || err)
     return null
@@ -215,8 +229,14 @@ function databaseErrorMessage(error) {
   const code = error?.code || ''
   const host = process.env.PGHOST || '?'
   const port = process.env.PGPORT || '5432'
-  if (code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
-    return `No se pudo conectar a PostgreSQL en ${host}:${port} (${code}). Revisa red/VPN y que el servidor esté encendido.`
+  const message = String(error?.message || error?.cause?.message || '')
+  if (
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    /timeout|terminated/i.test(message)
+  ) {
+    return `No se pudo conectar a PostgreSQL en ${host}:${port}. Desde tu PC no hay acceso directo a 192.168.3.146: abre el túnel SSH (puerto 15432) o conéctate a la VPN.`
   }
   if (code === '28P01') {
     return 'Credenciales de PostgreSQL rechazadas. Revisa PGUSER y PGPASSWORD en .env.'
@@ -302,6 +322,9 @@ function publicProfile(row, partner) {
       submitted: false,
       review1Status: 'pending',
       review2Status: 'locked',
+      contractDownloaded: false,
+      trainingCompleted: false,
+      icf12Downloaded: false,
     }
   }
   return {
@@ -326,6 +349,9 @@ function publicProfile(row, partner) {
     submitted: Boolean(row.submitted_at || row.review1_submitted_at),
     review1Status: row.review1_status || 'pending',
     review2Status: row.review2_status || 'locked',
+    contractDownloaded: Boolean(row.contract_downloaded_at),
+    trainingCompleted: Boolean(row.training_completed_at),
+    icf12Downloaded: Boolean(row.icf12_downloaded_at),
   }
 }
 
@@ -692,6 +718,9 @@ async function migrate() {
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS review1_submitted_at TIMESTAMPTZ;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS review2_status TEXT NOT NULL DEFAULT 'locked';
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS review2_submitted_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS contract_downloaded_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS training_completed_at TIMESTAMPTZ;
+    ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS icf12_downloaded_at TIMESTAMPTZ;
   `)
   await getPool().query(`
     UPDATE partner_profiles
@@ -830,12 +859,13 @@ const PDF_ONLY_CATEGORIES = new Set(['cv', 'data_treatment', 'audits_relation'])
 
 async function getReviewStatuses(partnerId) {
   const { rows } = await getPool().query(
-    'SELECT review1_status, review2_status FROM partner_profiles WHERE partner_id = $1',
+    'SELECT review1_status, review2_status, training_completed_at FROM partner_profiles WHERE partner_id = $1',
     [partnerId],
   )
   return {
     review1Status: rows[0]?.review1_status || 'pending',
     review2Status: rows[0]?.review2_status || 'locked',
+    trainingCompleted: Boolean(rows[0]?.training_completed_at),
   }
 }
 
@@ -1068,6 +1098,12 @@ export function createApi() {
         res.status(403).json({ error: 'El formato IC.F.1.2 se habilita cuando se apruebe la revisión 1.' })
         return
       }
+      if (category === 'icf12' && !reviews.trainingCompleted) {
+        res.status(403).json({
+          error: 'Completa el video de capacitación para habilitar la fase 2.',
+        })
+        return
+      }
       if (category === 'icf12' && reviewFrozen(reviews.review2Status)) {
         res.status(403).json({ error: 'La revisión 2 ya fue enviada y no se puede modificar.' })
         return
@@ -1107,6 +1143,15 @@ export function createApi() {
           r2Config().bucket,
         ],
       )
+      if (category === 'icf12') {
+        await getPool().query(
+          `UPDATE partner_profiles
+           SET icf12_downloaded_at = COALESCE(icf12_downloaded_at, now()),
+               updated_at = now()
+           WHERE partner_id = $1`,
+          [req.partner.id],
+        )
+      }
       res.status(201).json({ document: rows[0] })
     } catch (error) {
       console.error(error)
@@ -1338,6 +1383,77 @@ export function createApi() {
     res.json({ profile: publicProfile(rows[0], req.partner) })
   })
 
+  app.post('/api/profile/stage1/contract', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET contract_downloaded_at = COALESCE(contract_downloaded_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    await getPool().query(
+      `INSERT INTO partner_notifications (partner_id, title, body, link)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        req.partner.id,
+        'Descarga confirmada',
+        'Descargaste el contrato de Partner. La etapa 1 quedó completada.',
+        '/dashboard',
+      ],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
+  app.post('/api/profile/stage2/training', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET training_completed_at = COALESCE(training_completed_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    await getPool().query(
+      `INSERT INTO partner_notifications (partner_id, title, body, link)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        req.partner.id,
+        'Capacitación completada',
+        'Viste el video de inducción. Ya puedes continuar con la fase 2 cuando la documentación esté aprobada.',
+        '/dashboard/perfil',
+      ],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
+  app.post('/api/profile/stage2/icf12-download', requireAuth, async (req, res) => {
+    if (!canUseAuditorPipeline(req.partner.role)) {
+      res.status(403).json({ error: 'Esta etapa no está disponible para este rol.' })
+      return
+    }
+    await ensurePartnerProfile(req.partner.id)
+    const { rows } = await getPool().query(
+      `UPDATE partner_profiles
+       SET icf12_downloaded_at = COALESCE(icf12_downloaded_at, now()),
+           updated_at = now()
+       WHERE partner_id = $1
+       RETURNING *`,
+      [req.partner.id],
+    )
+    res.json({ profile: publicProfile(rows[0], req.partner), ok: true })
+  })
+
   app.post('/api/profile/submit', requireAuth, async (req, res) => {
     if (!canUseAuditorPipeline(req.partner.role)) {
       res.status(403).json({ error: 'Este formulario no está disponible para este rol.' })
@@ -1563,7 +1679,42 @@ export function createApi() {
     }
     const reviews = await getReviewStatuses(req.partner.id)
     if (reviewFrozen(reviews.review1Status)) {
-      res.status(400).json({ error: 'La revisión 1 ya está en curso o fue aprobada.' })
+      const application = await ensureApplication(req.partner.id)
+      const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
+        req.partner.id,
+      ])
+      const { rows: profileRows } = await getPool().query(
+        'SELECT * FROM partner_profiles WHERE partner_id = $1',
+        [req.partner.id],
+      )
+      const { rows: docRows } = await getPool().query(
+        `SELECT category, file_name, file_size, storage_key, mime_type
+         FROM documents
+         WHERE partner_id = $1
+           AND category = ANY($2::text[])
+           AND storage_key IS NOT NULL
+         ORDER BY created_at`,
+        [req.partner.id, REVIEW1_DOC_CATEGORIES],
+      )
+      const synced = await notifyHelpdeskPartnerAuditor({
+        stage: 1,
+        application,
+        partner: partnerRows[0],
+        profile: profileRows[0],
+        documents: docRows,
+      })
+      if (!synced) {
+        res.status(502).json({
+          error: 'La fase 1 ya estaba enviada, pero no se pudo crear el ticket en Operaciones. Reintenta en unos segundos.',
+        })
+        return
+      }
+      res.json({
+        user: publicUser(partnerRows[0]),
+        profile: publicProfile(profileRows[0], partnerRows[0]),
+        publicCode: application.public_code,
+        synced: true,
+      })
       return
     }
 
@@ -1647,6 +1798,12 @@ export function createApi() {
     const reviews = await getReviewStatuses(req.partner.id)
     if (reviews.review1Status !== 'approved') {
       res.status(403).json({ error: 'La revisión 2 se habilita cuando se apruebe la revisión 1.' })
+      return
+    }
+    if (!reviews.trainingCompleted) {
+      res.status(403).json({
+        error: 'Completa el video de capacitación antes de enviar la fase 2.',
+      })
       return
     }
     if (reviewFrozen(reviews.review2Status)) {

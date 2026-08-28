@@ -140,6 +140,9 @@ export type ProfessionalProfile = {
   submitted: boolean
   review1Status: ReviewStatus
   review2Status: Review2Status
+  contractDownloaded: boolean
+  trainingCompleted: boolean
+  icf12Downloaded: boolean
 }
 
 export type ReviewStatus =
@@ -231,6 +234,25 @@ export function saveProfile(payload: Partial<ProfessionalProfile> & { currentSte
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+}
+
+export function confirmStage1Contract() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>('/api/profile/stage1/contract', {
+    method: 'POST',
+  })
+}
+
+export function confirmStage2Training() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>('/api/profile/stage2/training', {
+    method: 'POST',
+  })
+}
+
+export function confirmIcf12Download() {
+  return request<{ profile: ProfessionalProfile; ok: boolean }>(
+    '/api/profile/stage2/icf12-download',
+    { method: 'POST' },
+  )
 }
 
 export function submitProfessionalProfile(payload: {

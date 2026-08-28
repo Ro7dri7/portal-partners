@@ -4,80 +4,55 @@ import type { JourneyStep } from '../utils/auditorProgress'
 
 type AuditorJourneyTimelineProps = {
   steps: JourneyStep[]
-  embedded?: boolean
 }
 
 const STEP_ICONS: Record<JourneyStep['key'], string> = {
-  account: 'how_to_reg',
-  profile: 'badge',
-  documents: 'folder_open',
-  review1: 'fact_check',
-  icf12: 'description',
-  approved: 'verified',
+  account: 'waving_hand',
+  profile: 'how_to_reg',
+  documents: 'handshake',
+  review1: 'forum',
+  icf12: 'school',
+  approved: 'storefront',
 }
 
-const STEP_COLORS = [
-  { accent: '#00032d', soft: '#dfe0ff' },
-  { accent: '#00677d', soft: '#b3ebff' },
-  { accent: '#0ea5b7', soft: '#c7f4fb' },
-  { accent: '#4e59a0', soft: '#dde1ff' },
-  { accent: '#d97706', soft: '#fff3c4' },
-  { accent: '#0f9f6e', soft: '#d1fae5' },
-]
-
-const MUTED_GREEN = '#4c9a78'
-const LOCKED_GRAY = '#9aa0b4'
-const LOCKED_BORDER = '#d3d6e2'
+const LOCKED = '#8A9199'
+const NAVY = '#0A165E'
+const COMPLETE = '#4ECDC4'
 
 function pad(index: number) {
   return String(index + 1).padStart(2, '0')
 }
 
-export function AuditorJourneyTimeline({ steps, embedded = false }: AuditorJourneyTimelineProps) {
-  const doneCount = steps.filter((step) => step.state === 'done').length
+export function AuditorJourneyTimeline({ steps }: AuditorJourneyTimelineProps) {
   const count = Math.max(steps.length, 1)
   const points = steps.map((_, index) => ({
     x: ((index + 0.5) / count) * 100,
-    y: index % 2 === 0 ? 31.5 : 56,
+    y: index % 2 === 0 ? 61 : 40,
   }))
   const polyline = points.map((point) => `${point.x},${point.y}`).join(' ')
 
-  const body = (
-      <>
-      {!embedded && (
-      <div className="mb-4 flex items-end justify-between gap-3">
+  return (
+    <section className="shrink-0 rounded-xl bg-[#eef3f8] p-5">
+      <div className="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h3 className="text-headline-sm font-semibold text-primary">Línea de tiempo</h3>
-          <p className="mt-1 text-body-md text-on-surface-variant">
-            Sigue los 6 pasos de tu proceso como Partner Auditor.
+          <h3 className="text-headline-sm font-semibold text-[#0A165E]">Línea de tiempo</h3>
+          <p className="mt-0.5 text-sm text-[#64748b]">
+            Completa las 6 etapas de tu proceso como Partner.
           </p>
         </div>
-        <p className="shrink-0 text-label-md font-semibold text-secondary">
-          {doneCount} / {steps.length}
+        <p className="shrink-0 text-label-md font-semibold text-[#159DBC]">
+          {steps.filter((step) => (step.fillPercent ?? 0) >= 100 || step.state === 'done').length} /{' '}
+          {steps.length}
         </p>
       </div>
-      )}
-      {embedded && (
-        <div className="flex items-end justify-between gap-3 px-5 pt-4">
-          <div>
-            <h3 className="text-headline-sm font-semibold text-primary">Línea de tiempo</h3>
-            <p className="mt-1 text-body-md text-on-surface-variant">
-              Sigue los 6 pasos de tu proceso como Partner Auditor.
-            </p>
-          </div>
-          <p className="shrink-0 text-label-md font-semibold text-secondary">
-            {doneCount} / {steps.length}
-          </p>
-        </div>
-      )}
 
-      <ol className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:hidden">
+      <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
         {steps.map((step, index) => (
           <TimelineNode key={step.key} step={step} index={index} compact />
         ))}
       </ol>
 
-      <div className="relative hidden h-[400px] w-full lg:block">
+      <div className="relative hidden h-[328px] w-full lg:block">
         <svg
           className="pointer-events-none absolute inset-0 z-0 h-full w-full"
           viewBox="0 0 100 100"
@@ -88,8 +63,9 @@ export function AuditorJourneyTimeline({ steps, embedded = false }: AuditorJourn
             className="timeline-zigzag"
             points={polyline}
             fill="none"
-            stroke="#c5c9de"
-            strokeWidth="0.45"
+            stroke="#0A165E"
+            strokeWidth="2.5"
+            vectorEffect="nonScalingStroke"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -101,16 +77,6 @@ export function AuditorJourneyTimeline({ steps, embedded = false }: AuditorJourn
           ))}
         </ol>
       </div>
-      </>
-  )
-
-  if (embedded) {
-    return <div className="flex h-full min-h-0 flex-col p-2 lg:p-0">{body}</div>
-  }
-
-  return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-5 shadow-level-1">
-      {body}
     </section>
   )
 }
@@ -124,77 +90,42 @@ function TimelineNode({
   index: number
   compact?: boolean
 }) {
-  const color = STEP_COLORS[index % STEP_COLORS.length]
-  const high = index % 2 === 0
-  const rejected = step.state === 'rejected'
-  const active = step.state === 'active'
-  const done = step.state === 'done'
+  const high = index % 2 === 1
+  const fill = Math.max(0, Math.min(100, step.fillPercent ?? 0))
+  const done = step.state === 'done' || fill >= 100
+  const active = step.state === 'active' && !done
   const locked = step.state === 'locked' || step.state === 'pending'
-  const isDocuments = step.key === 'documents'
-  const fill = isDocuments ? (step.fillPercent ?? 0) : done ? 100 : 0
-  const completeGreen = done || (isDocuments && fill >= 100 && !active)
-  const accent = rejected
-    ? '#ba1a1a'
-    : completeGreen
-      ? MUTED_GREEN
-      : active
-        ? color.accent
-        : LOCKED_GRAY
-  const iconName = completeGreen
-    ? 'check_circle'
-    : locked
-      ? 'lock'
-      : STEP_ICONS[step.key]
-  const iconOnFill = completeGreen || (isDocuments && fill >= 48)
-  const iconColor = completeGreen || active
-    ? '#ffffff'
-    : isDocuments && iconOnFill
-      ? '#ffffff'
-      : LOCKED_GRAY
-  const href = step.href
+  const href = locked ? undefined : step.href
+  const iconName = done ? 'check' : STEP_ICONS[step.key]
+  const onTeal = fill >= 45
+  const iconColor = done || onTeal ? '#ffffff' : locked ? LOCKED : NAVY
+  const borderColor = done ? COMPLETE : locked ? LOCKED : NAVY
 
   const circle = (
     <div
-      className={`relative z-20 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border-[4px] bg-white ${
+      className={`relative z-20 flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-full border-[3px] bg-white ${
         active ? 'timeline-pulse' : ''
-      } ${active && step.shine ? 'timeline-shine' : ''} ${href ? 'cursor-pointer transition-transform hover:scale-105' : ''}`}
-      style={{
-        borderColor: completeGreen ? MUTED_GREEN : active ? color.accent : LOCKED_BORDER,
-        opacity: 1,
-        boxShadow: active
-          ? `0 0 0 6px ${color.soft}, 0 10px 22px ${color.accent}33`
-          : completeGreen
-            ? `0 8px 16px ${MUTED_GREEN}22`
-            : '0 6px 12px rgba(15, 23, 42, 0.06)',
-      }}
+      } ${href ? 'cursor-pointer transition-transform hover:scale-105' : ''}`}
+      style={{ borderColor }}
     >
-      {isDocuments && !completeGreen && (
-        <div
-          className={`pointer-events-none absolute inset-x-0 bottom-0 ${active ? 'timeline-water' : ''}`}
-          style={{ height: `${fill}%`, background: color.accent }}
-        />
-      )}
-      {(completeGreen || (active && !isDocuments)) && (
-        <div
-          className="absolute inset-0"
-          style={{ background: completeGreen ? MUTED_GREEN : color.accent }}
-        />
+      {fill > 0 && (
+        <div className="timeline-fill" style={{ ['--fill-to' as string]: `${fill}%` }} />
       )}
       <span className="relative z-10 flex flex-col items-center" style={{ color: iconColor }}>
         <MaterialIcon
           name={iconName}
-          filled={done || active || completeGreen}
-          className="text-[32px]"
+          filled={done || active}
+          className={`drop-shadow-sm ${done ? 'text-[34px]' : 'text-[32px]'}`}
         />
-        {isDocuments && !completeGreen && (
-          <span className="text-[11px] font-extrabold leading-none">{fill}%</span>
-        )}
+        <span className="text-[10px] font-black leading-none drop-shadow-sm">
+          {Math.round(fill)}%
+        </span>
       </span>
     </div>
   )
 
   const clickableCircle = href ? (
-    <Link to={href} className="inline-flex" aria-label={`${step.label}, ${fill}%`}>
+    <Link to={href} className="inline-flex" aria-label={step.label}>
       {circle}
     </Link>
   ) : (
@@ -202,20 +133,28 @@ function TimelineNode({
   )
 
   const copy = (
-    <div className={`min-w-0 ${compact ? '' : 'px-1 text-center'}`}>
+    <div className={`min-w-0 ${compact ? '' : 'flex flex-col items-center px-1 text-center'}`}>
+      {!compact && !high && (
+        <div className="mb-2 h-8 w-0 border-l-[2px] border-dotted border-[#94a3b8]" />
+      )}
       <p
-        className="text-[22px] font-extrabold leading-none tracking-tight"
-        style={{ color: accent }}
+        className="text-[18px] font-black leading-none tracking-tight"
+        style={{ color: locked ? LOCKED : '#4592c9' }}
       >
         {pad(index)}
       </p>
       <h4
-        className="mt-1 text-label-md font-bold"
-        style={{ color: completeGreen ? MUTED_GREEN : active ? color.accent : '#767682' }}
+        className="mt-1 text-[12px] font-bold leading-snug"
+        style={{ color: locked ? LOCKED : NAVY }}
       >
         {step.label}
       </h4>
-      <p className="mt-0.5 text-sm text-on-surface-variant">{step.hint}</p>
+      <p className="mt-1 text-[11px] leading-snug" style={{ color: locked ? LOCKED : '#6B7280' }}>
+        {step.hint}
+      </p>
+      {!compact && high && (
+        <div className="mt-2 h-8 w-0 border-l-[2px] border-dotted border-[#94a3b8]" />
+      )}
     </div>
   )
 
@@ -232,13 +171,13 @@ function TimelineNode({
     <li className="relative h-full">
       {high ? (
         <>
-          <div className="absolute left-1/2 top-0 w-[92%] -translate-x-1/2">{copy}</div>
-          <div className="absolute left-1/2 top-[76px] -translate-x-1/2">{clickableCircle}</div>
+          <div className="absolute left-1/2 top-0 w-[94%] -translate-x-1/2">{copy}</div>
+          <div className="absolute left-1/2 top-[96px] -translate-x-1/2">{clickableCircle}</div>
         </>
       ) : (
         <>
-          <div className="absolute left-1/2 top-[176px] -translate-x-1/2">{clickableCircle}</div>
-          <div className="absolute left-1/2 top-[292px] w-[92%] -translate-x-1/2">{copy}</div>
+          <div className="absolute left-1/2 top-[164px] -translate-x-1/2">{clickableCircle}</div>
+          <div className="absolute left-1/2 top-[248px] w-[94%] -translate-x-1/2">{copy}</div>
         </>
       )}
     </li>

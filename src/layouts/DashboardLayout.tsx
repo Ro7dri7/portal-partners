@@ -339,7 +339,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
 
           <main
             className={`min-h-0 flex-1 p-4 md:px-margin-page md:py-5 ${
-              isHome ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'
+              isHome ? 'flex flex-col overflow-y-auto' : 'overflow-y-auto'
             }`}
           >
             {children}
