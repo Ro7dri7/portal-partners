@@ -17,8 +17,8 @@ type DashboardContext = {
 export const ICF12_TRAINING_ID = 'icf12-format'
 export const AUDIT_REPORT_TRAINING_ID = 'audit-report-fill'
 export const COMMERCIAL_TRAINING_ID = 'commercial-training'
-const ICF12_VIDEO_SRC = '/videos/icf12-formato.mp4'
-const AUDIT_REPORT_VIDEO_SRC = `/videos/${encodeURIComponent('videoplayback (1).mp4')}`
+const ICF12_VIDEO_SRC = `/videos/${encodeURIComponent('AUDIT REGISTRATION FORM- PARTNERS.mp4')}`
+const AUDIT_REPORT_VIDEO_SRC = `/videos/${encodeURIComponent('LLENADO DE AUDIT REPORT- PARTNERS.mp4')}`
 const COVER_OPS =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAk604ldHs9fYP8K4K0ep2srOT9FGqIwhOiQPpCt8vnU-1EivLJAE-u696eO7843DoUQREOwZTdtFrG0UlGlEgcgEdmiD5sRQg1qDR2c0ifCGgr_WEP9zpuiXtaWFa8jNf1KoSJaLDbn84sTzP7W0-kxEYZmZcZJAGY6ZCskENUg01xyRQUTPpsJP_BuBViTGxlHVZLSX8bRVXIIS-zxoEckupVmU852xSVZlXyXN653WAEOptnbyYCQw'
 const COVER_COM =
@@ -232,6 +232,13 @@ export function TrainingPage() {
       )}
 
       <section>
+        <Link
+          to="/dashboard"
+          className="mb-3 inline-flex items-center gap-1.5 text-label-md font-semibold text-secondary hover:text-secondary/80"
+        >
+          <MaterialIcon name="arrow_back" className="text-[20px]" />
+          Volver al inicio
+        </Link>
         <h2 className="mb-1 text-headline-md font-bold text-primary">Centro de Capacitación</h2>
         <p className="text-body-md text-on-surface-variant">
           Materiales para optimizar tu gestión como Partner: procesos operativos y estrategias

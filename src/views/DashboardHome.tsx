@@ -195,14 +195,14 @@ export function DashboardHome() {
   )
 }
 
-const INTRO_VIDEO_SRC = '/videos/introduccion-partner.mp4'
+const INTRO_VIDEO_SRC = `/videos/${encodeURIComponent('Documentos Afiliación Partners.mov')}`
 
 function IntroVideo() {
   return (
     <section className="mt-4 shrink-0 overflow-hidden rounded-xl border border-outline-variant/30 bg-[#0A165E] shadow-level-1">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <p className="text-label-md font-semibold text-white">Video de introducción</p>
-        <p className="text-sm text-white/70">Introducción al Partner Portal</p>
+        <p className="text-sm text-white/70">Documentos de afiliación Partners</p>
       </div>
       <video
         className="max-h-[280px] w-full bg-black object-contain"
@@ -210,6 +210,7 @@ function IntroVideo() {
         playsInline
         poster="/partners-logo-blanco.png"
       >
+        <source src={INTRO_VIDEO_SRC} type="video/quicktime" />
         <source src={INTRO_VIDEO_SRC} type="video/mp4" />
       </video>
     </section>

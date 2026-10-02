@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from '../app-router'
 import { MaterialIcon } from './MaterialIcon'
 import VideoPlayer from './VideoPlayer'
 
@@ -59,6 +60,17 @@ export default function TrainingCatalog({
   const comercial = visible.filter((item) => item.area === 'comercial')
   const active = items.find((item) => item.id === activeId)
 
+  useEffect(() => {
+    if (!activeId) return
+    const timer = window.setTimeout(() => {
+      document.getElementById('training-player')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [activeId])
+
   return (
     <div className="space-y-5">
       <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-outline-variant/20 bg-surface p-4 shadow-[0_2px_4px_rgba(0,0,0,0.02)]">
@@ -88,16 +100,25 @@ export default function TrainingCatalog({
           id="training-player"
           className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-stack-lg shadow-level-1"
         >
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-headline-sm font-semibold text-primary">{active.title}</h3>
-            <button
-              type="button"
-              onClick={() => setActiveId(null)}
-              className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container"
-              aria-label="Cerrar reproductor"
-            >
-              <MaterialIcon name="close" />
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/dashboard"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant px-3 py-1.5 text-label-md font-semibold text-primary hover:bg-surface-container"
+              >
+                <MaterialIcon name="arrow_back" className="text-[18px]" />
+                Volver al inicio
+              </Link>
+              <button
+                type="button"
+                onClick={() => setActiveId(null)}
+                className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container"
+                aria-label="Cerrar reproductor"
+              >
+                <MaterialIcon name="close" />
+              </button>
+            </div>
           </div>
           {active.videoSrc ? (
             <TrackedVideo
@@ -180,7 +201,7 @@ function TrackedVideo({
         if (isNearEnd(event.currentTarget)) markDone()
       }}
     >
-      <source src={src} type="video/mp4" />
+      <source src={src} type={src.toLowerCase().includes('.mov') ? 'video/quicktime' : 'video/mp4'} />
     </video>
   )
 }

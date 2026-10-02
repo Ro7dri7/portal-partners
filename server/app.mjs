@@ -524,11 +524,15 @@ async function createPartnerNotification(partnerId, { title, body, link }) {
 
 async function loadPartnerForEmail(partnerId) {
   if (!partnerId) return null
-  const { rows } = await getPool().query(
-    `SELECT id, email, first_name, last_name, role FROM partners WHERE id = $1`,
-    [partnerId],
-  )
-  return rows[0] || null
+  const partner = await findPartnerById(partnerId)
+  if (!partner) return null
+  return {
+    id: partner.id,
+    email: partner.email,
+    first_name: partner.first_name,
+    last_name: partner.last_name,
+    role: partner.role,
+  }
 }
 
 function formatDeadlineLabel(deadlineAt, durationLabel) {
@@ -604,7 +608,11 @@ async function sendPendingDocsReminders() {
        ORDER BY COALESCE(created_at, updated_at)
        LIMIT 40
      )
-     RETURNING id, email, first_name, last_name, role`,
+     RETURNING id,
+       pii_dec(email) AS email,
+       pii_dec(first_name) AS first_name,
+       pii_dec(last_name) AS last_name,
+       role`,
   )
   for (const partner of rows) {
     queueEmail(async () => {
@@ -635,7 +643,11 @@ async function sendPendingDocsReminders() {
          )
        LIMIT 40
      )
-     RETURNING p.id, p.email, p.first_name, p.last_name, p.role`,
+     RETURNING p.id,
+       pii_dec(p.email) AS email,
+       pii_dec(p.first_name) AS first_name,
+       pii_dec(p.last_name) AS last_name,
+       p.role`,
   )
   for (const partner of trainingDue) {
     queueEmail(async () => {
@@ -676,8 +688,59 @@ function publicUser(row) {
   }
 }
 
+const PARTNER_PII_SELECT = `
+  id,
+  pii_dec(first_name) AS first_name,
+  pii_dec(last_name) AS last_name,
+  pii_dec(email) AS email,
+  password_hash,
+  created_at,
+  updated_at,
+  role,
+  auditor_request_status,
+  documents_unlocked,
+  documents_submitted_at,
+  terms_accepted_at,
+  avatar_url,
+  email_verified,
+  email_verify_code_hash,
+  email_verify_expires_at,
+  pii_dec(comercial_email) AS comercial_email,
+  pii_dec(comercial_name) AS comercial_name,
+  last_docs_reminder_at,
+  last_training_notice_at
+`
+
+async function findPartnerById(id) {
+  const { rows } = await getPool().query(
+    `SELECT ${PARTNER_PII_SELECT} FROM partners WHERE id = $1`,
+    [id],
+  )
+  return rows[0] || null
+}
+
+async function findPartnerByEmail(email) {
+  const { rows } = await getPool().query(
+    `SELECT ${PARTNER_PII_SELECT} FROM partners WHERE pii_dec(email) = $1`,
+    [String(email || '').trim().toLowerCase()],
+  )
+  return rows[0] || null
+}
+
+async function tryMigrateQuery(sql) {
+  try {
+    await getPool().query(sql)
+  } catch (error) {
+    if (error?.code === '42501') {
+      console.warn('[migrate] sin permiso, se omite:', error.message)
+      return
+    }
+    throw error
+  }
+}
+
 async function migrate() {
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'afiliado';
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS auditor_request_status TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS documents_unlocked BOOLEAN NOT NULL DEFAULT false;
@@ -695,7 +758,7 @@ async function migrate() {
     ALTER TABLE partners ADD COLUMN IF NOT EXISTS last_training_notice_at TIMESTAMPTZ;
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS auditor_requests (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -706,7 +769,7 @@ async function migrate() {
     )
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS documents (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -718,10 +781,10 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_category_check
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE documents
       ADD CONSTRAINT documents_category_check
       CHECK (category IN (
@@ -731,14 +794,14 @@ async function migrate() {
         'advisor_rates', 'casa_matriz_contract'
       ))
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_key TEXT;
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_bucket TEXT;
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS partner_profiles (
       partner_id UUID PRIMARY KEY REFERENCES partners(id) ON DELETE CASCADE,
       full_name TEXT,
@@ -760,7 +823,7 @@ async function migrate() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS country TEXT;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS city TEXT;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS phone_extension TEXT;
@@ -779,13 +842,13 @@ async function migrate() {
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS casa_matriz_downloaded_at TIMESTAMPTZ;
     ALTER TABLE partner_profiles ADD COLUMN IF NOT EXISTS commercial_training_at TIMESTAMPTZ;
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     UPDATE partner_profiles
     SET review1_status = 'sent',
         review1_submitted_at = COALESCE(review1_submitted_at, submitted_at)
     WHERE submitted_at IS NOT NULL AND review1_status = 'pending'
   `)
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS auditor_audits (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -802,7 +865,7 @@ async function migrate() {
     )
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS applications (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -812,7 +875,7 @@ async function migrate() {
     )
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS application_comments (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
@@ -826,14 +889,14 @@ async function migrate() {
     )
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS referenced_docs JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ;
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS deadline_duration_label TEXT;
     ALTER TABLE application_comments ADD COLUMN IF NOT EXISTS track TEXT NOT NULL DEFAULT 'auditor';
   `)
 
-  await getPool().query(`
+  await tryMigrateQuery(`
     CREATE TABLE IF NOT EXISTS partner_notifications (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
@@ -849,7 +912,12 @@ async function migrate() {
 let migratePromise
 
 function ensureMigrated() {
-  if (!migratePromise) migratePromise = migrate()
+  if (!migratePromise) {
+    migratePromise = migrate().catch((error) => {
+      migratePromise = null
+      throw error
+    })
+  }
   return migratePromise
 }
 
@@ -878,12 +946,12 @@ async function requireAuth(req, res, next) {
       res.status(401).json({ error: 'Sesión no válida. Inicia sesión de nuevo.' })
       return
     }
-    const { rows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [payload.id])
-    if (!rows[0]) {
+    const partner = await findPartnerById(payload.id)
+    if (!partner) {
       res.status(401).json({ error: 'Usuario no encontrado.' })
       return
     }
-    req.partner = rows[0]
+    req.partner = partner
     req.token = token
     next()
   } catch (error) {
@@ -994,8 +1062,8 @@ export function createApi() {
       return
     }
 
-    const existing = await getPool().query('SELECT id FROM partners WHERE email = $1', [email])
-    if (existing.rows[0]) {
+    const existing = await findPartnerByEmail(email)
+    if (existing) {
       res.status(409).json({ error: 'Ya existe una cuenta con este correo.' })
       return
     }
@@ -1005,32 +1073,50 @@ export function createApi() {
       const documentsUnlocked = true
       const { rows } = await getPool().query(
       `INSERT INTO partners
-        (first_name, last_name, email, password_hash, role, auditor_request_status, documents_unlocked, terms_accepted_at, comercial_email, comercial_name)
-       VALUES ($1, $2, $3, $4, $5, 'none', $6, now(), $7, $8)
-       RETURNING *`,
+        (id, first_name, last_name, email, password_hash, role, auditor_request_status, documents_unlocked, email_verified, terms_accepted_at, comercial_email, comercial_name, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'none', $6, false, now(), $7, $8, now(), now())
+       RETURNING id`,
       [firstName, lastName, email, passwordHash, role, documentsUnlocked, coordinator.email, coordinator.name],
       )
-      await getPool().query(
-        `INSERT INTO partner_profiles (partner_id, country, country_city, updated_at)
-         VALUES ($1, $2, $2, now())
-         ON CONFLICT (partner_id) DO UPDATE SET
-           country = EXCLUDED.country,
-           country_city = CASE
-             WHEN partner_profiles.city IS NULL OR partner_profiles.city = '' THEN EXCLUDED.country
-             ELSE CONCAT_WS(' / ', EXCLUDED.country, partner_profiles.city)
-           END,
-           updated_at = now()`,
-        [rows[0].id, country],
+      const partnerRow = await findPartnerById(rows[0].id)
+      if (!partnerRow) {
+        res.status(500).json({ error: 'La cuenta se creó pero no se pudo leer. Prueba iniciar sesión.' })
+        return
+      }
+      const existingProfile = await getPool().query(
+        'SELECT partner_id FROM partner_profiles WHERE partner_id = $1',
+        [rows[0].id],
       )
+      if (!existingProfile.rows[0]) {
+        await getPool().query(
+          `INSERT INTO partner_profiles (partner_id, country, country_city, updated_at)
+           VALUES ($1, $2, $2, now())`,
+          [rows[0].id, country],
+        )
+      } else {
+        await getPool().query(
+          `UPDATE partner_profiles
+           SET country = $2,
+               country_city = $2,
+               updated_at = now()
+           WHERE partner_id = $1`,
+          [rows[0].id, country],
+        )
+      }
 
-      const user = publicUser(rows[0])
+      const user = publicUser(partnerRow)
       const token = signToken({ id: user.id })
       setSessionCookies(res, user, token)
-      queueEmail(() => sendWelcomePendingDocsEmail(rows[0]))
+      queueEmail(() => sendWelcomePendingDocsEmail(partnerRow))
       res.status(201).json({ user, token })
     } catch (error) {
       if (error?.code === '23505') {
         res.status(409).json({ error: 'Ya existe una cuenta con este correo.' })
+        return
+      }
+      if (error?.code === '23502') {
+        console.error(error)
+        res.status(500).json({ error: 'No se pudo crear la cuenta. Falta un dato obligatorio en la base.' })
         return
       }
       throw error
@@ -1045,8 +1131,7 @@ export function createApi() {
       return
     }
 
-    const { rows } = await getPool().query('SELECT * FROM partners WHERE email = $1', [email])
-    const partner = rows[0]
+    const partner = await findPartnerByEmail(email)
     if (!partner?.password_hash) {
       res.status(401).json({ error: 'Correo o contraseña incorrectos.' })
       return
@@ -1712,10 +1797,14 @@ export function createApi() {
   }
 
   async function ensurePartnerProfile(partnerId) {
+    const { rows } = await getPool().query(
+      'SELECT partner_id FROM partner_profiles WHERE partner_id = $1',
+      [partnerId],
+    )
+    if (rows[0]) return
     await getPool().query(
       `INSERT INTO partner_profiles (partner_id, updated_at)
-       VALUES ($1, now())
-       ON CONFLICT (partner_id) DO NOTHING`,
+       VALUES ($1, now())`,
       [partnerId],
     )
   }
@@ -1829,9 +1918,7 @@ export function createApi() {
     const reviews = await getReviewStatuses(req.partner.id)
     if (reviewFrozen(reviews.review1Status)) {
       const application = await ensureApplication(req.partner.id)
-      const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
-        req.partner.id,
-      ])
+      const partnerRow = await findPartnerById(req.partner.id)
       const { rows: profileRows } = await getPool().query(
         'SELECT * FROM partner_profiles WHERE partner_id = $1',
         [req.partner.id],
@@ -1848,7 +1935,7 @@ export function createApi() {
       const synced = await notifyHelpdeskPartnerAuditor({
         stage: 1,
         application,
-        partner: partnerRows[0],
+        partner: partnerRow,
         profile: profileRows[0],
         documents: docRows,
       })
@@ -1859,8 +1946,8 @@ export function createApi() {
         return
       }
       res.json({
-        user: publicUser(partnerRows[0]),
-        profile: publicProfile(profileRows[0], partnerRows[0]),
+        user: publicUser(partnerRow),
+        profile: publicProfile(profileRows[0], partnerRow),
         publicCode: application.public_code,
         synced: true,
       })
@@ -1908,9 +1995,7 @@ export function createApi() {
       req.partner.id,
       'Recibimos tu documentación de la revisión 1. El equipo técnico de Intercert evaluará CV, diploma, certificados y el historial de auditorías.',
     )
-    const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
-      req.partner.id,
-    ])
+    const { rows: partnerRows } = { rows: [await findPartnerById(req.partner.id)].filter(Boolean) }
     const { rows: profileRows } = await getPool().query(
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
       [req.partner.id],
@@ -1990,9 +2075,7 @@ export function createApi() {
       req.partner.id,
       'Recibimos el formato IC.F.1.2 Application and Auditor Registration - Initial. El equipo técnico iniciará esta segunda revisión.',
     )
-    const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
-      req.partner.id,
-    ])
+    const { rows: partnerRows } = { rows: [await findPartnerById(req.partner.id)].filter(Boolean) }
     const { rows: profileRows } = await getPool().query(
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
       [req.partner.id],
@@ -2057,9 +2140,7 @@ export function createApi() {
       req.partner.id,
       'Recibimos tu contrato comercial firmado. El equipo comercial lo revisará.',
     )
-    const { rows: partnerRows } = await getPool().query('SELECT * FROM partners WHERE id = $1', [
-      req.partner.id,
-    ])
+    const { rows: partnerRows } = { rows: [await findPartnerById(req.partner.id)].filter(Boolean) }
     const { rows: profileRows } = await getPool().query(
       'SELECT * FROM partner_profiles WHERE partner_id = $1',
       [req.partner.id],
