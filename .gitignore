@@ -17,6 +17,10 @@ dist-ssr
 _setup_db.py
 _alter_db.py
 
+# Training videos stay off Git (deploy via R2 or scp)
+public/videos/*
+!public/videos/.gitkeep
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
