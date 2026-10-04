@@ -205,14 +205,17 @@ async function notifyHelpdeskPartnerComment({ publicCode, author, text }) {
 }
 
 let pool
+let poolHost
 
 function getPool() {
-  if (!pool) {
-    dotenv.config()
-    const host = process.env.PGHOST
-    if (!host) {
-      throw new Error('Falta PGHOST en el archivo .env')
-    }
+  dotenv.config({ override: true })
+  const host = process.env.PGHOST
+  if (!host) {
+    throw new Error('Falta PGHOST en el archivo .env')
+  }
+  if (!pool || poolHost !== host) {
+    if (pool) void pool.end().catch(() => {})
+    poolHost = host
     pool = new pg.Pool({
       host,
       port: Number(process.env.PGPORT || 5432),

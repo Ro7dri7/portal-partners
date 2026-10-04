@@ -5,7 +5,7 @@ import node from '@astrojs/node'
 import tailwindcss from '@tailwindcss/vite'
 import { createApi } from './server/app.mjs'
 
-dotenv.config()
+dotenv.config({ override: true })
 
 export default defineConfig({
   output: 'server',
