@@ -12,8 +12,10 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  // middleware: exporta `handler` para montarlo en Express (server-entry.mjs).
+  // standalone NO sirve para custom server: arranca su propio listen() sin nuestra API.
   adapter: node({
-    mode: 'standalone',
+    mode: 'middleware',
   }),
   integrations: [react()],
   vite: {
